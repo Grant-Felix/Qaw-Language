@@ -9,8 +9,8 @@
 #ifndef YAO_PARSER_H
 #define YAO_PARSER_H
 
-#include "yao/ast.h"
-#include "yao/lexer.h"
+#include "qaw/ast.h"
+#include "qaw/lexer.h"
 
 /* 解析错误信息 */
 typedef struct {

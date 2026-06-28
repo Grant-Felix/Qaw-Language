@@ -4,7 +4,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "yao/ast.h"
+#include "qaw/ast.h"
 
 #include <stdio.h>
 #include <stdlib.h>

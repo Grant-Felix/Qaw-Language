@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: 构建
+        run: cd src && make
+
+      - name: 运行单元测试
+        run: cd src && make test
+
+      - name: 端到端：解析 + 执行
+        run: |
+          cd src
+          for f in examples/*.qaw; do
+              echo "==> 运行 $f"
+              ./build/qawc run "$f" || exit 1
+          done
+
+      - name: 端到端：编译为原生二进制
+        run: |
+          cd src
+          ./build/qawc build examples/hello.qaw -o /tmp/hello
+          /tmp/hello

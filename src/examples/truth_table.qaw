@@ -1,0 +1,34 @@
+// 文件名: truth_table.qaw
+// 演示短路求值 + match 表达式
+
+func classify(n: int) -> string {
+    match n {
+        0 => return "零"
+        1 => return "一"
+        2 => return "二"
+        _ => return "很多"
+    }
+    return ""
+}
+
+func main() -> void {
+    print("=== 短路求值 ===")
+    let x = 0
+    if x != 0 && 10 / x > 1 {
+        print("不会执行")
+    } else {
+        print("x 是 0，跳过除法")
+    }
+
+    print("")
+    print("=== match 表达式 ===")
+    for i from 0 to 4 {
+        print("${i}: ${classify(i)}")
+    }
+
+    print("")
+    print("=== for-in 字符串 ===")
+    for c in "你好" {
+        print("字符: ${c}")
+    }
+}

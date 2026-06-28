@@ -4,9 +4,9 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "yao/lexer.h"
-#include "yao/parser.h"
-#include "yao/ast.h"
+#include "qaw/lexer.h"
+#include "qaw/parser.h"
+#include "qaw/ast.h"
 
 #include <stdio.h>
 #include <stdlib.h>

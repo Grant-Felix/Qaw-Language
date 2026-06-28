@@ -4,7 +4,9 @@
  * 妖语言 v0.1 POC 引导版
  */
 
-#include "yao/ast.h"
+#define _POSIX_C_SOURCE 200809L
+
+#include "qaw/ast.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -246,6 +248,32 @@ AstNode *ast_new_for_range(const char *var, AstNode *start, AstNode *end, AstNod
     return n;
 }
 
+AstNode *ast_new_match(AstNode *scrutinee, AstMatchArm *arms, size_t n_arms, int line, int col) {
+    AstNode *n = ast_new(AST_MATCH_STMT, line, col);
+    if (!n) return NULL;
+    n->as.match_stmt.scrutinee = scrutinee;
+    n->as.match_stmt.arms = NULL;
+    n->as.match_stmt.n_arms = 0;
+    if (n_arms > 0) {
+        n->as.match_stmt.arms = (AstMatchArm *)malloc(sizeof(AstMatchArm) * n_arms);
+        if (n->as.match_stmt.arms) {
+            for (size_t i = 0; i < n_arms; i++) {
+                n->as.match_stmt.arms[i].pattern = arms[i].pattern ? strdup(arms[i].pattern) : NULL;
+                n->as.match_stmt.arms[i].body = arms[i].body;
+            }
+            n->as.match_stmt.n_arms = n_arms;
+        }
+    }
+    return n;
+}
+
+AstMatchArm ast_match_arm(const char *pattern, AstNode *body) {
+    AstMatchArm a;
+    a.pattern = pattern ? strdup(pattern) : NULL;
+    a.body = body;
+    return a;
+}
+
 AstNode *ast_new_return(AstNode *value, int line, int col) {
     AstNode *n = ast_new(AST_RETURN_STMT, line, col);
     if (!n) return NULL;
@@ -457,6 +485,17 @@ void ast_free(AstNode *node) {
             ast_free(node->as.for_stmt.body);
             break;
 
+        case AST_MATCH_STMT:
+            ast_free(node->as.match_stmt.scrutinee);
+            if (node->as.match_stmt.arms) {
+                for (size_t i = 0; i < node->as.match_stmt.n_arms; i++) {
+                    free(node->as.match_stmt.arms[i].pattern);
+                    ast_free(node->as.match_stmt.arms[i].body);
+                }
+                free(node->as.match_stmt.arms);
+            }
+            break;
+
         case AST_RETURN_STMT:
             ast_free(node->as.return_stmt.value);
             break;
@@ -543,6 +582,7 @@ const char *ast_kind_name(AstKind kind) {
         case AST_IF_STMT: return "if_stmt";
         case AST_WHILE_STMT: return "while_stmt";
         case AST_FOR_STMT: return "for_stmt";
+        case AST_MATCH_STMT: return "match_stmt";
         case AST_RETURN_STMT: return "return_stmt";
         case AST_BREAK_STMT: return "break_stmt";
         case AST_CONTINUE_STMT: return "continue_stmt";
@@ -710,6 +750,17 @@ void ast_print(const AstNode *node, int indent) {
             if (node->as.for_stmt.step)
                 ast_print(node->as.for_stmt.step, indent + 2);
             ast_print(node->as.for_stmt.body, indent + 2);
+            break;
+
+        case AST_MATCH_STMT:
+            printf(" arms=%zu\n", node->as.match_stmt.n_arms);
+            if (node->as.match_stmt.scrutinee)
+                ast_print(node->as.match_stmt.scrutinee, indent + 2);
+            for (size_t i = 0; i < node->as.match_stmt.n_arms; i++) {
+                print_indent(indent + 2);
+                printf("arm[%zu] pattern='%s'\n", i, node->as.match_stmt.arms[i].pattern ? node->as.match_stmt.arms[i].pattern : "");
+                ast_print(node->as.match_stmt.arms[i].body, indent + 2);
+            }
             break;
 
         case AST_RETURN_STMT:

@@ -15,7 +15,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "yao/parser.h"
+#include "qaw/parser.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -684,6 +684,86 @@ static AstNode *parse_while(Parser *p) {
     return ast_new_while(cond, body, line, col);
 }
 
+/* 解析 match 表达式
+ * match expr {
+ *     pattern1 => body1,
+ *     pattern2 => body2,
+ *     _ => default_body,
+ * }
+ */
+static AstNode *parse_match(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);  /* match */
+
+    AstNode *scrutinee = parse_expr(p);
+    if (!expect(p, TOK_LBRACE, "'{'")) {
+        ast_free(scrutinee);
+        return NULL;
+    }
+
+    /* v0.1 简化：每个 arm 是 (pattern_str, body) */
+    AstMatchArm arms[32];
+    size_t n_arms = 0;
+
+    while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF) && n_arms < 32) {
+        if (p->panic_mode) {
+            synchronize(p);
+        }
+        char *pat = NULL;
+        if (check(p, TOK_INT_LIT)) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%lld", (long long)atoll(p->current.lexeme));
+            pat = strdup(buf);
+            advance(p);
+        } else if (check(p, TOK_FLOAT_LIT)) {
+            pat = strdup(p->current.lexeme);
+            advance(p);
+        } else if (check(p, TOK_STRING_LIT)) {
+            size_t len = p->current.lexeme_len;
+            if (len >= 2) {
+                pat = strndup(p->current.lexeme + 1, len - 2);
+            } else {
+                pat = strdup("");
+            }
+            advance(p);
+        } else if (check(p, TOK_KW_TRUE)) {
+            pat = strdup("true");
+            advance(p);
+        } else if (check(p, TOK_KW_FALSE)) {
+            pat = strdup("false");
+            advance(p);
+        } else if (check(p, TOK_IDENT)) {
+            pat = strdup(p->current.lexeme);
+            advance(p);
+        } else {
+            if (p->current.lexeme && strcmp(p->current.lexeme, "_") == 0) {
+                pat = strdup("_");
+                advance(p);
+            } else {
+                p->has_error = 1;
+                pat = strdup("?");
+                advance(p);
+            }
+        }
+
+        if (!expect(p, TOK_FAT_ARROW, "'=>'")) {
+            free(pat);
+            while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) advance(p);
+            break;
+        }
+
+        AstNode *body = parse_expr(p);
+        arms[n_arms] = ast_match_arm(pat, body);
+        free(pat);
+        n_arms++;
+        match(p, TOK_COMMA);
+    }
+
+    expect(p, TOK_RBRACE, "'}'");
+
+    return ast_new_match(scrutinee, arms, n_arms, line, col);
+}
+
 /* 解析 for */
 static AstNode *parse_for(Parser *p) {
     int line = p->current.line, col = p->current.col;
@@ -741,6 +821,7 @@ static AstNode *parse_stmt(Parser *p) {
         case TOK_KW_IF:    return parse_if(p);
         case TOK_KW_WHILE: return parse_while(p);
         case TOK_KW_FOR:   return parse_for(p);
+        case TOK_KW_MATCH: return parse_match(p);
         default:
             return parse_expr_stmt(p);
     }

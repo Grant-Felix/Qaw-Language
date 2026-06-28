@@ -4,12 +4,12 @@
  * 妖语言 v0.5 MVP：C 代码生成后端
  */
 
-#include "yao/lexer.h"
-#include "yao/parser.h"
-#include "yao/ast.h"
-#include "yao/interpreter.h"
-#include "yao/env.h"
-#include "yao/codegen.h"
+#include "qaw/lexer.h"
+#include "qaw/parser.h"
+#include "qaw/ast.h"
+#include "qaw/interpreter.h"
+#include "qaw/env.h"
+#include "qaw/codegen.h"
 
 #include <stdio.h>
 #include <stdlib.h>

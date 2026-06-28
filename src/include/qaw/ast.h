@@ -15,6 +15,9 @@
 
 /* ============ 节点类型 ============ */
 
+/* 前向声明（其它子结构需要引用） */
+typedef struct AstNode AstNode;
+
 typedef enum {
     /* 字面量 */
     AST_INT_LIT,
@@ -42,6 +45,7 @@ typedef enum {
     AST_IF_STMT,
     AST_WHILE_STMT,
     AST_FOR_STMT,
+    AST_MATCH_STMT,
     AST_RETURN_STMT,
     AST_BREAK_STMT,
     AST_CONTINUE_STMT,
@@ -163,6 +167,26 @@ typedef struct {
     struct AstNode *body;
 } AstForStmt;
 
+/* match arm：pattern 是字符串形式（字面量值 / "_" / ident） */
+typedef struct {
+    char *pattern;                 /* 模式字符串 */
+    AstNode *body;
+} AstMatchArm;
+
+/* match 语句：
+ *   match scrutinee {
+ *       pattern => body,
+ *       ...
+ *       _ => default_body,
+ *   }
+ * v0.1 简化：scratinee 走 scrutinee_stmt？这里用 expr；arms 是 match arms
+ */
+typedef struct {
+    AstNode *scrutinee;
+    AstMatchArm *arms;
+    size_t n_arms;
+} AstMatchStmt;
+
 /* return 语句 */
 typedef struct {
     struct AstNode *value;         /* 可为 NULL */
@@ -260,6 +284,7 @@ struct AstNode {
         AstIfStmt if_stmt;
         AstWhileStmt while_stmt;
         AstForStmt for_stmt;
+        AstMatchStmt match_stmt;
         AstReturnStmt return_stmt;
 
         AstFunction function;
@@ -297,6 +322,7 @@ AstNode *ast_new_if(AstNode *cond, AstNode *then_block, AstNode *else_block, int
 AstNode *ast_new_while(AstNode *cond, AstNode *body, int line, int col);
 AstNode *ast_new_for_in(const char *var, AstNode *iterable, AstNode *body, int line, int col);
 AstNode *ast_new_for_range(const char *var, AstNode *start, AstNode *end, AstNode *step, AstNode *body, int line, int col);
+AstNode *ast_new_match(AstNode *scrutinee, AstMatchArm *arms, size_t n_arms, int line, int col);
 AstNode *ast_new_return(AstNode *value, int line, int col);
 AstNode *ast_new_break(int line, int col);
 AstNode *ast_new_continue(int line, int col);
@@ -311,6 +337,9 @@ AstNode *ast_new_program(AstNode **items, size_t n_items, int line, int col);
 /* 字符串插值辅助 */
 AstInterpPart ast_interp_text(const char *text);
 AstInterpPart ast_interp_expr(AstNode *expr);
+
+/* match arm 辅助 */
+AstMatchArm ast_match_arm(const char *pattern, AstNode *body);
 
 /* ============ 释放 ============ */
 

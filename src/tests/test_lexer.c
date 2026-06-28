@@ -2,7 +2,7 @@
  * test_lexer.c — 词法分析器单元测试
  */
 
-#include "yao/lexer.h"
+#include "qaw/lexer.h"
 
 #include <stdio.h>
 #include <stdlib.h>

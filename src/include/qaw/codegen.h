@@ -12,7 +12,7 @@
 #ifndef QAW_CODEGEN_H
 #define QAW_CODEGEN_H
 
-#include "yao/ast.h"
+#include "qaw/ast.h"
 
 /* 生成 C 代码
  *

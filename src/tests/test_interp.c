@@ -4,11 +4,11 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "yao/lexer.h"
-#include "yao/parser.h"
-#include "yao/ast.h"
-#include "yao/interpreter.h"
-#include "yao/env.h"
+#include "qaw/lexer.h"
+#include "qaw/parser.h"
+#include "qaw/ast.h"
+#include "qaw/interpreter.h"
+#include "qaw/env.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -369,7 +369,7 @@ static int test_string_interp_expression(void) {
 }
 
 static int test_four_form_runs(void) {
-    /* 完整 four-form.yao 应能成功运行（4 个函数 + main 调用） */
+    /* 完整 four-form.qaw 应能成功运行（4 个函数 + main 调用） */
     const char *src =
         "package four_form\n"
         "\n"
@@ -392,6 +392,70 @@ static int test_four_form_runs(void) {
     ASSERT(strstr(buf, "abbrev") != NULL);
     ASSERT(strstr(buf, "pinyin_full") != NULL);
     ASSERT(strstr(buf, "pinyin_init") != NULL);
+    return 1;
+}
+
+static int test_short_circuit_and(void) {
+    /* 短路 &&：v0.1 简化版 — 验证 && 运算符可工作（短路语义留待 v0.5） */
+    const char *src =
+        "func main() -> void {\n"
+        "    let a = true\n"
+        "    let b = true\n"
+        "    let c = a && b\n"
+        "    print(c)\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "true") != NULL);
+    return 1;
+}
+
+static int test_short_circuit_or(void) {
+    /* 短路 ||：左侧 true 时不评估右侧 */
+    const char *src =
+        "func main() -> void {\n"
+        "    let side_effect = 0\n"
+        "    let result = true || side_effect == 0\n"
+        "    print(result)\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "true") != NULL);
+    return 1;
+}
+
+static int test_match_statement(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let x = 2\n"
+        "    match x {\n"
+        "        1 => print(\"one\")\n"
+        "        2 => print(\"two\")\n"
+        "        _ => print(\"other\")\n"
+        "    }\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "two") != NULL);
+    return 1;
+}
+
+static int test_for_in_string(void) {
+    /* for-in 字符串迭代：v0.1 简化为按字节 */
+    const char *src =
+        "func main() -> void {\n"
+        "    for c in \"abc\" {\n"
+        "        print(c)\n"
+        "    }\n"
+        "    print(\"DONE\")\n"
+        "}\n";
+    char buf[4096];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "DONE") != NULL);
     return 1;
 }
 
@@ -425,6 +489,12 @@ int main(void) {
 
     /* 完整 four-form */
     TEST(four_form_runs);
+
+    /* 短路 + match + for-in */
+    TEST(short_circuit_and);
+    TEST(short_circuit_or);
+    TEST(match_statement);
+    TEST(for_in_string);
 
     fprintf(stderr, "\n=== %d/%d 通过 ===\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;

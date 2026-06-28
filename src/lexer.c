@@ -4,7 +4,7 @@
  * 妖语言 v0.1 POC 引导版
  */
 
-#include "yao/lexer.h"
+#include "qaw/lexer.h"
 
 #include <stdlib.h>
 #include <string.h>

@@ -7,7 +7,7 @@
 #ifndef YAO_LEXER_H
 #define YAO_LEXER_H
 
-#include "yao/token.h"
+#include "qaw/token.h"
 
 /* 词法错误信息 */
 typedef struct {

@@ -12,7 +12,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "yao/codegen.h"
+#include "qaw/codegen.h"
 
 #include <stdio.h>
 #include <stdlib.h>

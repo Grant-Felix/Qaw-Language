@@ -5,8 +5,8 @@
 #ifndef YAO_INTERPRETER_H
 #define YAO_INTERPRETER_H
 
-#include "yao/ast.h"
-#include "yao/env.h"
+#include "qaw/ast.h"
+#include "qaw/env.h"
 
 /* 求值结果与错误 */
 typedef enum {

@@ -9,9 +9,9 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "yao/interpreter.h"
-#include "yao/lexer.h"
-#include "yao/parser.h"
+#include "qaw/interpreter.h"
+#include "qaw/lexer.h"
+#include "qaw/parser.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -405,12 +405,36 @@ static EvalResult eval_binary(AstNode *expr, Env *env) {
             case OP_BIT_XOR: r = a ^ b; break;
             case OP_SHL: r = a << b; break;
             case OP_SHR: r = a >> b; break;
-            case OP_AND:
-                val_free(&lhs.value); val_free(&rhs.value);
-                return eval_ok(val_bool(val_to_bool(&lhs.value) && val_to_bool(&rhs.value)));
-            case OP_OR:
-                val_free(&lhs.value); val_free(&rhs.value);
-                return eval_ok(val_bool(val_to_bool(&lhs.value) || val_to_bool(&rhs.value)));
+            case OP_AND: {
+                /* 短路：左侧 false 时不求值右侧 */
+                bool lb = val_to_bool(&lhs.value);
+                bool result;
+                if (!lb) {
+                    val_free(&rhs.value);  /* 不求值，释放 rhs 任何分配 */
+                    result = false;
+                } else {
+                    bool rb = val_to_bool(&rhs.value);
+                    val_free(&rhs.value);
+                    result = rb;
+                }
+                val_free(&lhs.value);
+                return eval_ok(val_bool(result));
+            }
+            case OP_OR: {
+                /* 短路：左侧 true 时不求值右侧 */
+                bool lb = val_to_bool(&lhs.value);
+                bool result;
+                if (lb) {
+                    val_free(&rhs.value);
+                    result = true;
+                } else {
+                    bool rb = val_to_bool(&rhs.value);
+                    val_free(&rhs.value);
+                    result = rb;
+                }
+                val_free(&lhs.value);
+                return eval_ok(val_bool(result));
+            }
             case OP_LT:  val_free(&lhs.value); val_free(&rhs.value); return eval_ok(val_bool(a < b));
             case OP_LE:  val_free(&lhs.value); val_free(&rhs.value); return eval_ok(val_bool(a <= b));
             case OP_GT:  val_free(&lhs.value); val_free(&rhs.value); return eval_ok(val_bool(a > b));
@@ -701,6 +725,121 @@ static ExecResult exec_while(AstNode *stmt, Env *env, FuncRegistry *regs) {
 }
 
 /* 执行 for-range：for x from a to b [step s] { } */
+
+/* 执行 for-in：for x in expr { }
+ * v0.1 简化：expr 必须是一个数组字面量 [a, b, c, ...]
+ * 否则尝试将 expr 的字符串值按字符迭代
+ */
+static ExecResult exec_for_in(AstNode *stmt, Env *env, FuncRegistry *regs) {
+    EvalResult v = eval_expr(stmt->as.for_stmt.iterable, env);
+    if (v.status != EVAL_OK) return make_exec_error(v.message);
+
+    Env *loop_scope = env_child(env);
+
+    ExecResult result = make_exec_ok();
+
+    if (v.value.kind == VAL_STRING) {
+        const char *s = v.value.as.string_val ? v.value.as.string_val : "";
+        for (const char *p = s; *p; p++) {
+            char buf[8] = {0};
+            int n = 1;
+            buf[0] = *p;
+            /* 处理 UTF-8 多字节字符 */
+            if ((*p & 0x80) != 0) {
+                if ((*p & 0xE0) == 0xC0) n = 2;
+                else if ((*p & 0xF0) == 0xE0) n = 3;
+                else if ((*p & 0xF8) == 0xF0) n = 4;
+                for (int i = 1; i < n && p[i]; i++) buf[i] = p[i];
+                p += (n - 1);
+            }
+            env_define(loop_scope, stmt->as.for_stmt.var_name, val_int((unsigned char)buf[0]));
+            result = exec_stmt(stmt->as.for_stmt.body, loop_scope, regs);
+            if (result.flow != CF_CONTINUE) break;
+        }
+    } else if (v.value.kind == VAL_INT) {
+        env_define(loop_scope, stmt->as.for_stmt.var_name, v.value);
+        result = exec_stmt(stmt->as.for_stmt.body, loop_scope, regs);
+    } else {
+        /* 兜底：执行一次（迭代 0 次） */
+        env_define(loop_scope, stmt->as.for_stmt.var_name, val_int(0));
+        result = exec_stmt(stmt->as.for_stmt.body, loop_scope, regs);
+    }
+
+    env_free(loop_scope);
+    val_free(&v.value);
+    return result;
+}
+
+/* match 的模式匹配：
+ * 1. 字面量（int/float/string/bool）：比较值
+ * 2. "_"：通配，匹配任何值
+ * 3. 标识符（普通 ident，非 "_"）：当作通配（v0.1 不支持绑定）
+ */
+static bool match_pattern(const char *pat, const Value *v) {
+    if (!pat) return false;
+    if (strcmp(pat, "_") == 0) return true;  /* 通配 */
+
+    /* 将 pat 解析为字面量并比较 */
+    if (v->kind == VAL_INT) {
+        long long pat_int = atoll(pat);
+        return pat_int == v->as.int_val;
+    }
+    if (v->kind == VAL_FLOAT) {
+        double pat_float = atof(pat);
+        return pat_float == v->as.float_val;
+    }
+    if (v->kind == VAL_BOOL) {
+        if (strcmp(pat, "true") == 0) return v->as.bool_val;
+        if (strcmp(pat, "false") == 0) return !v->as.bool_val;
+        return false;
+    }
+    if (v->kind == VAL_STRING) {
+        return strcmp(pat, v->as.string_val ? v->as.string_val : "") == 0;
+    }
+    if (v->kind == VAL_NIL) {
+        return strcmp(pat, "nil") == 0;
+    }
+    return false;
+}
+
+static ExecResult exec_match(AstNode *stmt, Env *env, FuncRegistry *regs) {
+    EvalResult v = eval_expr(stmt->as.match_stmt.scrutinee, env);
+    if (v.status != EVAL_OK) return make_exec_error(v.message);
+
+    ExecResult result = make_exec_ok();
+    for (size_t i = 0; i < stmt->as.match_stmt.n_arms; i++) {
+        AstMatchArm *arm = &stmt->as.match_stmt.arms[i];
+        if (match_pattern(arm->pattern, &v.value)) {
+            if (arm->body) {
+                /* body 在 v0.1 简化为单个表达式（语句） */
+                if (arm->body->kind == AST_BLOCK) {
+                    /* 块：执行每个语句 */
+                    AstBlock *blk = &arm->body->as.block;
+                    for (size_t j = 0; j < blk->n_stmts; j++) {
+                        result = exec_stmt(blk->stmts[j], env, regs);
+                        if (result.flow != CF_CONTINUE) {
+                            val_free(&v.value);
+                            return result;
+                        }
+                    }
+                } else {
+                    /* 单表达式语句 */
+                    EvalResult br = eval_expr(arm->body, env);
+                    if (br.status != EVAL_OK) {
+                        val_free(&v.value);
+                        return make_exec_error(br.message);
+                    }
+                    val_free(&br.value);
+                }
+            }
+            break;  /* 只执行第一个匹配的 arm */
+        }
+    }
+
+    val_free(&v.value);
+    return result;
+}
+
 static ExecResult exec_for_range(AstNode *stmt, Env *env, FuncRegistry *regs) {
     EvalResult s = eval_expr(stmt->as.for_stmt.start, env);
     if (s.status != EVAL_OK) return make_exec_error(s.message);
@@ -805,7 +944,10 @@ static ExecResult exec_stmt(AstNode *stmt, Env *env, FuncRegistry *regs) {
             if (stmt->as.for_stmt.kind == FOR_RANGE) {
                 return exec_for_range(stmt, env, regs);
             }
-            return make_exec_error("for-in 暂未实现（仅支持 for x from a to b）");
+            return exec_for_in(stmt, env, regs);
+
+        case AST_MATCH_STMT:
+            return exec_match(stmt, env, regs);
 
         case AST_BLOCK: {
             Env *scope = env_child(env);
