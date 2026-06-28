@@ -1,0 +1,31 @@
+# 构建产物
+src/build/
+*.o
+*.a
+*.so
+*.exe
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 临时文件
+*.tmp
+*.bak
+*.orig
+
+# Python（编译脚本可能用到）
+__pycache__/
+*.pyc
+
+# 测试输出
+*.log
+core
+core.*
+
+# 历史蓝图（不再维护，仅参考）
+archive/
