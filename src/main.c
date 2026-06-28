@@ -5,6 +5,8 @@
  */
 
 #include "yao/lexer.h"
+#include "yao/parser.h"
+#include "yao/ast.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,13 +17,16 @@ static void usage(void) {
         "用法: yaoc <command> [options] <file>\n"
         "\n"
         "命令:\n"
-        "  run <file>     词法分析并打印 Token 列表（v0.1 POC）\n"
-        "  check <file>   同 run\n"
-        "  version        打印版本\n"
-        "  help           显示帮助\n"
+        "  lex <file>      词法分析并打印 Token 列表\n"
+        "  parse <file>    解析为 AST 并打印\n"
+        "  run <file>      解析（执行留待第 7-12 周）\n"
+        "  check <file>    解析检查\n"
+        "  version         打印版本\n"
+        "  help            显示帮助\n"
         "\n"
         "示例:\n"
-        "  yaoc run examples/hello.yao\n");
+        "  yaoc lex examples/hello.yao\n"
+        "  yaoc parse examples/four-form.yao\n");
 }
 
 static char *read_file(const char *path) {
@@ -44,7 +49,9 @@ static char *read_file(const char *path) {
     return buf;
 }
 
-static int cmd_run(const char *path) {
+/* ============ lex ============ */
+
+static int cmd_lex(const char *path) {
     char *src = read_file(path);
     if (!src) return 1;
 
@@ -69,9 +76,7 @@ static int cmd_run(const char *path) {
             fprintf(stderr, "词法错误 at %d:%d: '%s'\n",
                     t.line, t.col, t.lexeme ? t.lexeme : "");
             const LexError *err = lexer_last_error(lex);
-            if (err) {
-                fprintf(stderr, "  %s\n", err->message);
-            }
+            if (err) fprintf(stderr, "  %s\n", err->message);
             token_free(&t);
             lexer_free(lex);
             free(src);
@@ -94,6 +99,53 @@ static int cmd_run(const char *path) {
     return 0;
 }
 
+/* ============ parse ============ */
+
+static int cmd_parse(const char *path) {
+    char *src = read_file(path);
+    if (!src) return 1;
+
+    Lexer *lex = lexer_new(src);
+    if (!lex) {
+        free(src);
+        return 1;
+    }
+
+    Parser *p = parser_new(lex);
+    if (!p) {
+        lexer_free(lex);
+        free(src);
+        return 1;
+    }
+
+    printf("=== 语法分析: %s ===\n", path);
+    AstNode *program = parser_parse_program(p);
+
+    if (program) {
+        printf("\n--- AST ---\n");
+        ast_print(program, 0);
+        printf("\n=== 解析成功 ===\n");
+        ast_free(program);
+    } else {
+        const ParseError *err = parser_last_error(p);
+        fprintf(stderr, "解析失败:\n");
+        if (err) {
+            fprintf(stderr, "  %d:%d: %s\n", err->line, err->col, err->message);
+        }
+    }
+
+    parser_free(p);
+    lexer_free(lex);
+    free(src);
+    return program ? 0 : 1;
+}
+
+/* ============ run / check（暂时等价于 parse） ============ */
+
+static int cmd_run(const char *path) {
+    return cmd_parse(path);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         usage();
@@ -110,13 +162,17 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    if (strcmp(argv[1], "run") == 0 || strcmp(argv[1], "check") == 0) {
-        if (argc < 3) {
+    const char *cmd = argv[1];
+    const char *path = (argc >= 3) ? argv[2] : NULL;
+
+    if (strcmp(cmd, "lex") == 0 || strcmp(cmd, "check") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "parse") == 0) {
+        if (!path) {
             fprintf(stderr, "错误：缺少文件参数\n");
             usage();
             return 1;
         }
-        return cmd_run(argv[2]);
+        if (strcmp(cmd, "lex") == 0) return cmd_lex(path);
+        return cmd_parse(path);  /* parse / run / check 当前都走解析路径 */
     }
 
     fprintf(stderr, "未知命令: %s\n", argv[1]);
