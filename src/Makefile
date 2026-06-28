@@ -21,6 +21,8 @@ SRCS = \
 
 OBJS = $(SRCS:%.c=$(BUILDDIR)/%.o)
 
+OBJS = $(SRCS:%.c=$(BUILDDIR)/%.o)
+
 # 目标
 TARGET = $(BUILDDIR)/yaoc
 
@@ -28,7 +30,11 @@ TARGET = $(BUILDDIR)/yaoc
 TEST_SRCS = $(wildcard tests/*.c)
 TEST_BINS = $(TEST_SRCS:tests/%.c=$(BUILDDIR)/%)
 
-.PHONY: all test clean
+# 各测试需要的对象文件
+test_lexer_OBJS = $(BUILDDIR)/lexer.o
+test_ast_OBJS   = $(BUILDDIR)/ast.o
+
+.PHONY: all test test-lexer test-ast clean
 
 all: $(TARGET)
 
@@ -41,14 +47,21 @@ $(BUILDDIR)/%.o: %.c | $(BUILDDIR)
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
-test: $(TEST_BINS)
-	@for t in $(TEST_BINS); do \
-		echo "==> Running $$t"; \
-		$$t || exit 1; \
-	done
+test: test-lexer test-ast
 
-$(BUILDDIR)/%: tests/%.c $(BUILDDIR)/lexer.o $(BUILDDIR)/ast.o | $(BUILDDIR)
-	$(CC) $(CFLAGS) -I$(INCDIR) -o $@ $< $(BUILDDIR)/lexer.o $(BUILDDIR)/ast.o
+test-lexer: $(BUILDDIR)/test_lexer
+	@echo "==> Running test_lexer"
+	@$(BUILDDIR)/test_lexer
+
+test-ast: $(BUILDDIR)/test_ast
+	@echo "==> Running test_ast"
+	@$(BUILDDIR)/test_ast
+
+$(BUILDDIR)/test_lexer: tests/test_lexer.c $(test_lexer_OBJS) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(INCDIR) -o $@ $< $(test_lexer_OBJS)
+
+$(BUILDDIR)/test_ast: tests/test_ast.c $(test_ast_OBJS) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(INCDIR) -o $@ $< $(test_ast_OBJS)
 
 clean:
 	rm -rf $(BUILDDIR)
