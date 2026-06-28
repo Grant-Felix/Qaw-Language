@@ -7,6 +7,8 @@
 #include "yao/lexer.h"
 #include "yao/parser.h"
 #include "yao/ast.h"
+#include "yao/interpreter.h"
+#include "yao/env.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,14 +21,13 @@ static void usage(void) {
         "命令:\n"
         "  lex <file>      词法分析并打印 Token 列表\n"
         "  parse <file>    解析为 AST 并打印\n"
-        "  run <file>      解析（执行留待第 7-12 周）\n"
+        "  run <file>      解析并执行（目前仅 main 函数内的表达式语句）\n"
         "  check <file>    解析检查\n"
         "  version         打印版本\n"
         "  help            显示帮助\n"
         "\n"
         "示例:\n"
-        "  yaoc lex examples/hello.yao\n"
-        "  yaoc parse examples/four-form.yao\n");
+        "  yaoc run examples/hello.yao\n");
 }
 
 static char *read_file(const char *path) {
@@ -140,10 +141,41 @@ static int cmd_parse(const char *path) {
     return program ? 0 : 1;
 }
 
-/* ============ run / check（暂时等价于 parse） ============ */
+/* ============ run（解析 + 执行） ============ */
 
 static int cmd_run(const char *path) {
-    return cmd_parse(path);
+    char *src = read_file(path);
+    if (!src) return 1;
+
+    Lexer *lex = lexer_new(src);
+    if (!lex) { free(src); return 1; }
+
+    Parser *p = parser_new(lex);
+    if (!p) { lexer_free(lex); free(src); return 1; }
+
+    AstNode *program = parser_parse_program(p);
+
+    int exit_code = 0;
+    if (program) {
+        Env *env = env_new();
+        EvalStatus status = interp_exec_program(program, env);
+        if (status != EVAL_OK) {
+            fprintf(stderr, "运行时错误\n");
+            exit_code = 1;
+        }
+        env_free(env);
+        ast_free(program);
+    } else {
+        const ParseError *err = parser_last_error(p);
+        fprintf(stderr, "解析失败:\n");
+        if (err) fprintf(stderr, "  %d:%d: %s\n", err->line, err->col, err->message);
+        exit_code = 1;
+    }
+
+    parser_free(p);
+    lexer_free(lex);
+    free(src);
+    return exit_code;
 }
 
 int main(int argc, char **argv) {
@@ -171,8 +203,11 @@ int main(int argc, char **argv) {
             usage();
             return 1;
         }
-        if (strcmp(cmd, "lex") == 0) return cmd_lex(path);
-        return cmd_parse(path);  /* parse / run / check 当前都走解析路径 */
+if (strcmp(cmd, "lex") == 0) return cmd_lex(path);
+    if (strcmp(cmd, "parse") == 0 || strcmp(cmd, "check") == 0) return cmd_parse(path);
+    if (strcmp(cmd, "run") == 0) return cmd_run(path);
+    /* 旧兼容 */
+    return cmd_parse(path);
     }
 
     fprintf(stderr, "未知命令: %s\n", argv[1]);
