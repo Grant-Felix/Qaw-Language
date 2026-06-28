@@ -256,6 +256,491 @@ static AstNode *parse_literal(Parser *p) {
 
 static AstNode *parse_param_list(Parser *p);
 
+/* ============ 前向声明 ============ */
+
+static char *parse_type(Parser *p);
+static AstNode *parse_expr(Parser *p);
+static AstNode *parse_expr_bp(Parser *p, int min_bp);
+static AstNode *parse_postfix(Parser *p);
+static AstNode *parse_unary(Parser *p);
+static AstNode *parse_literal(Parser *p);
+static AstNode *parse_block_real(Parser *p);
+static AstNode *parse_stmt(Parser *p);
+static Token peek(Parser *p);
+
+/* ============ 表达式：Pratt 解析器 ============ */
+
+/* 运算符优先级（binding power）
+ *
+ * 数字越大优先级越高。同一行的左结合 = (lbp, rbp = lbp+1)
+ * 右结合 = (lbp = rbp)
+ *
+ * 优先级表（来自附录 B）：
+ *   1:  =（赋值，右结合）         lbp=0,  rbp=1
+ *   2:  ||                       lbp=1,  rbp=2
+ *   3:  &&                       lbp=2,  rbp=3
+ *   4:  == != < <= > >=         lbp=3,  rbp=4
+ *   5:  |                        lbp=4,  rbp=5
+ *   6:  ^                        lbp=5,  rbp=6
+ *   7:  &                        lbp=6,  rbp=7
+ *   8:  << >>                    lbp=7,  rbp=8
+ *   9:  + -                      lbp=8,  rbp=9
+ *   10: * / %                    lbp=9,  rbp=10
+ *   12: ?. ??                   lbp=12, rbp=13
+ *   14: 一元 - ! ~               （前缀）
+ */
+
+typedef struct {
+    TokenKind tok;
+    BinOp binop;     /* OP_* 或 0 表示无 */
+    UnOp unop;       /* 0 或 UOP_* */
+    int lbp;
+    int rbp;
+    int is_assign;   /* 赋值是右结合 */
+} OpInfo;
+
+static int op_info(TokenKind tok, OpInfo *out) {
+    out->is_assign = 0;
+    switch (tok) {
+        /* 赋值：右结合 */
+        case TOK_EQ:
+            out->binop = OP_ASSIGN; out->unop = 0; out->lbp = 0; out->rbp = 1; out->is_assign = 1; return 1;
+        /* 逻辑或 */
+        case TOK_OR_OR:
+            out->binop = OP_OR; out->unop = 0; out->lbp = 1; out->rbp = 2; return 1;
+        /* 逻辑与 */
+        case TOK_AND_AND:
+            out->binop = OP_AND; out->unop = 0; out->lbp = 2; out->rbp = 3; return 1;
+        /* 比较 */
+        case TOK_EQEQ: out->binop = OP_EQ;  out->unop = 0; out->lbp = 3; out->rbp = 4; return 1;
+        case TOK_NEQ:  out->binop = OP_NEQ; out->unop = 0; out->lbp = 3; out->rbp = 4; return 1;
+        case TOK_LT:   out->binop = OP_LT;  out->unop = 0; out->lbp = 3; out->rbp = 4; return 1;
+        case TOK_LE:   out->binop = OP_LE;  out->unop = 0; out->lbp = 3; out->rbp = 4; return 1;
+        case TOK_GT:   out->binop = OP_GT;  out->unop = 0; out->lbp = 3; out->rbp = 4; return 1;
+        case TOK_GE:   out->binop = OP_GE;  out->unop = 0; out->lbp = 3; out->rbp = 4; return 1;
+        /* 位或 */
+        case TOK_PIPE:
+            out->binop = OP_BIT_OR; out->unop = 0; out->lbp = 4; out->rbp = 5; return 1;
+        /* 位异或 */
+        case TOK_CARET:
+            out->binop = OP_BIT_XOR; out->unop = 0; out->lbp = 5; out->rbp = 6; return 1;
+        /* 位与 */
+        case TOK_AMP:
+            out->binop = OP_BIT_AND; out->unop = 0; out->lbp = 6; out->rbp = 7; return 1;
+        /* 移位 */
+        case TOK_SHL: out->binop = OP_SHL; out->unop = 0; out->lbp = 7; out->rbp = 8; return 1;
+        case TOK_SHR: out->binop = OP_SHR; out->unop = 0; out->lbp = 7; out->rbp = 8; return 1;
+        /* 算术 */
+        case TOK_PLUS:  out->binop = OP_ADD; out->unop = 0; out->lbp = 8; out->rbp = 9; return 1;
+        case TOK_MINUS: out->binop = OP_SUB; out->unop = 0; out->lbp = 8; out->rbp = 9; return 1;
+        /* 乘除模 */
+        case TOK_STAR:    out->binop = OP_MUL; out->unop = 0; out->lbp = 9; out->rbp = 10; return 1;
+        case TOK_SLASH:   out->binop = OP_DIV; out->unop = 0; out->lbp = 9; out->rbp = 10; return 1;
+        case TOK_PERCENT: out->binop = OP_MOD; out->unop = 0; out->lbp = 9; out->rbp = 10; return 1;
+        /* 可选链 */
+        case TOK_QUESTION_DOT:
+            /* TODO: 暂用普通成员访问 */
+            out->binop = 0; out->unop = 0; out->lbp = 12; out->rbp = 13; return 1;
+        /* 空值合并 */
+        case TOK_QUESTION_QUESTION:
+            out->binop = OP_CONCAT; out->unop = 0; out->lbp = 12; out->rbp = 13; return 1;
+        default:
+            return 0;
+    }
+}
+
+/* 一元运算符 */
+static int unop_info(TokenKind tok, UnOp *out) {
+    switch (tok) {
+        case TOK_MINUS:    *out = UOP_NEG; return 1;
+        case TOK_BANG:     *out = UOP_NOT; return 1;
+        case TOK_CARET:    *out = UOP_BIT_NOT; return 1;  /* ~ */
+        default: return 0;
+    }
+}
+
+/* 解析前缀一元运算（递归用） */
+static AstNode *parse_unary(Parser *p) {
+    int line = p->current.line;
+    int col = p->current.col;
+    UnOp op;
+    if (unop_info(p->current.kind, &op)) {
+        TokenKind tk = p->current.kind;
+        advance(p);
+        AstNode *operand = parse_unary(p);  /* 允许嵌套 */
+        return ast_new_unary(op, operand, line, col);
+    }
+    /* 否则解析基本字面量 */
+    return parse_postfix(p);
+}
+
+/* 解析后缀：函数调用、字段访问、索引、切片 */
+static AstNode *parse_postfix(Parser *p) {
+    int line = p->current.line;
+    int col = p->current.col;
+    AstNode *expr = NULL;
+
+    /* 基本字面量 */
+    switch (p->current.kind) {
+        case TOK_INT_LIT:    expr = parse_int_lit(p); break;
+        case TOK_FLOAT_LIT:  expr = parse_float_lit(p); break;
+        case TOK_STRING_LIT: expr = parse_string_lit(p); break;
+        case TOK_CHAR_LIT:   expr = parse_char_lit(p); break;
+        case TOK_KW_TRUE:    expr = parse_bool_lit(p, true); break;
+        case TOK_KW_FALSE:   expr = parse_bool_lit(p, false); break;
+        case TOK_IDENT:      expr = parse_ident(p); break;
+        case TOK_LPAREN: {
+            /* 括号表达式：(expr) */
+            advance(p);
+            expr = parse_expr(p);
+            expect(p, TOK_RPAREN, "')'");
+            break;
+        }
+        default: {
+            /* 错误：期望表达式 */
+            if (!p->panic_mode) {
+                p->has_error = 1;
+                p->panic_mode = 1;
+                snprintf(p->last_error.message, sizeof(p->last_error.message),
+                         "期望表达式，得到 %s at %d:%d",
+                         token_kind_name(p->current.kind),
+                         p->current.line, p->current.col);
+                p->last_error.line = p->current.line;
+                p->last_error.col = p->current.col;
+            }
+            return NULL;
+        }
+    }
+
+    /* 后缀循环：调用、字段、索引、切片 */
+    while (expr) {
+        if (check(p, TOK_LPAREN)) {
+            /* 函数调用 */
+            int cline = p->current.line, ccol = p->current.col;
+            advance(p);  /* ( */
+            AstNode **args = NULL;
+            size_t n_args = 0;
+            if (!check(p, TOK_RPAREN)) {
+                AstNode *tmp_args[64];
+                size_t tmp_n = 0;
+                do {
+                    AstNode *arg = parse_expr(p);
+                    if (!arg) break;
+                    tmp_args[tmp_n++] = arg;
+                } while (match(p, TOK_COMMA) && tmp_n < 64);
+                args = tmp_args;
+                n_args = tmp_n;
+            }
+            expect(p, TOK_RPAREN, "')'");
+            expr = ast_new_call(expr, args, n_args, cline, ccol);
+        } else if (check(p, TOK_DOT)) {
+            /* 字段访问 */
+            int cline = p->current.line, ccol = p->current.col;
+            advance(p);  /* . */
+            if (!check(p, TOK_IDENT)) {
+                p->has_error = 1;
+                break;
+            }
+            char *field = strdup(p->current.lexeme);
+            advance(p);
+            expr = ast_new_field_access(expr, field, cline, ccol);
+        } else if (check(p, TOK_LBRACKET)) {
+            /* 索引或切片 */
+            int cline = p->current.line, ccol = p->current.col;
+            advance(p);  /* [ */
+            AstNode *start = NULL, *end = NULL;
+            if (!check(p, TOK_COLON)) {
+                start = parse_expr(p);
+            }
+            bool inclusive = false;
+            if (match(p, TOK_COLON)) {
+                /* 切片 [start:end] 或 [start:..=end] */
+                if (!check(p, TOK_RBRACKET) && !check(p, TOK_DOT_DOT_EQ)) {
+                    end = parse_expr(p);
+                }
+                if (match(p, TOK_DOT_DOT_EQ)) {
+                    /* [start:..=end] 语法需要在 end 之前；
+                     * 当前实现：end 已经解析，DOT_DOT_EQ 仅在 end 缺失时 */
+                    inclusive = true;
+                    if (!check(p, TOK_RBRACKET)) {
+                        end = parse_expr(p);
+                    }
+                }
+            } else if (match(p, TOK_DOT_DOT)) {
+                /* [start..end] 切片 */
+                inclusive = false;
+                if (!check(p, TOK_RBRACKET)) {
+                    end = parse_expr(p);
+                }
+            } else {
+                /* 索引 [start] */
+                end = NULL;
+            }
+            expect(p, TOK_RBRACKET, "']'");
+            if (end == NULL && start != NULL) {
+                /* 纯索引 */
+                expr = ast_new_index(expr, start, cline, ccol);
+            } else {
+                expr = ast_new_slice(expr, start, end, inclusive, cline, ccol);
+            }
+        } else {
+            break;
+        }
+    }
+
+    return expr;
+}
+
+/* Pratt 解析器主入口 */
+static AstNode *parse_expr_bp(Parser *p, int min_bp) {
+    AstNode *lhs = parse_unary(p);
+    if (!lhs) return NULL;
+
+    while (1) {
+        OpInfo op;
+        if (!op_info(p->current.kind, &op)) break;
+        if (op.lbp < min_bp) break;
+
+        int line = p->current.line, col = p->current.col;
+        TokenKind tk = p->current.kind;
+        advance(p);
+
+        if (op.is_assign) {
+            /* 赋值是右结合：min_bp = op.rbp（不 +1） */
+            AstNode *rhs = parse_expr_bp(p, op.rbp);
+            lhs = ast_new_assign(lhs, rhs, line, col);
+        } else {
+            AstNode *rhs = parse_expr_bp(p, op.rbp);
+            lhs = ast_new_binary(op.binop, lhs, rhs, line, col);
+        }
+    }
+
+    return lhs;
+}
+
+static AstNode *parse_expr(Parser *p) {
+    return parse_expr_bp(p, 0);
+}
+
+/* ============ 语句 ============ */
+
+/* 解析类型注解（可选） */
+static char *parse_optional_type(Parser *p) {
+    if (check(p, TOK_COLON)) {
+        advance(p);
+        return parse_type(p);
+    }
+    return NULL;
+}
+
+/* 解析表达式语句 */
+static AstNode *parse_expr_stmt(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    AstNode *expr = parse_expr(p);
+    AstNode *stmt = ast_new_expr_stmt(expr, line, col);
+    /* 可选分号 */
+    match(p, TOK_SEMI);
+    return stmt;
+}
+
+/* 解析变量声明 */
+static AstNode *parse_var_decl(Parser *p, bool is_mut) {
+    int line = p->current.line, col = p->current.col;
+    /* 跳过 let/var/mut */
+    advance(p);
+
+    /* 可选 mut 修饰符 */
+    if (match(p, TOK_KW_MUT)) {
+        is_mut = true;
+    }
+
+    if (!check(p, TOK_IDENT)) {
+        p->has_error = 1;
+        p->panic_mode = 1;
+        snprintf(p->last_error.message, sizeof(p->last_error.message),
+                 "期望变量名，得到 %s at %d:%d",
+                 token_kind_name(p->current.kind),
+                 p->current.line, p->current.col);
+        return NULL;
+    }
+    char *name = strdup(p->current.lexeme);
+    advance(p);
+
+    char *type = parse_optional_type(p);
+
+    AstNode *init = NULL;
+    if (match(p, TOK_EQ)) {
+        init = parse_expr(p);
+    }
+
+    match(p, TOK_SEMI);
+    return ast_new_var_decl(name, type, is_mut, init, line, col);
+}
+
+/* 解析 return */
+static AstNode *parse_return(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);  /* return */
+    AstNode *value = NULL;
+    /* 如果不是语句结尾，则解析表达式 */
+    if (!check(p, TOK_SEMI) && !check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
+        value = parse_expr(p);
+    }
+    match(p, TOK_SEMI);
+    return ast_new_return(value, line, col);
+}
+
+/* 解析 break / continue */
+static AstNode *parse_break(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);
+    match(p, TOK_SEMI);
+    return ast_new_break(line, col);
+}
+
+static AstNode *parse_continue(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);
+    match(p, TOK_SEMI);
+    return ast_new_continue(line, col);
+}
+
+/* 前置声明：parse_block_real 之前先有占位 parse_block */
+static AstNode *parse_block_dummy(Parser *p) {
+    /* 由 parse_block_real 替换 */
+    return NULL;
+}
+
+/* 真正的 block 解析（在 parse_stmt / parse_if / parse_while / parse_for 中使用） */
+static AstNode *parse_block_real(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    if (!expect(p, TOK_LBRACE, "'{'")) {
+        return NULL;
+    }
+
+    AstNode *stmts[256];
+    size_t n_stmts = 0;
+
+    while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF) && n_stmts < 256) {
+        if (p->panic_mode) {
+            synchronize(p);
+        }
+        AstNode *stmt = parse_stmt(p);
+        if (stmt) {
+            stmts[n_stmts++] = stmt;
+        }
+    }
+
+    expect(p, TOK_RBRACE, "'}'");
+    return ast_new_block(stmts, n_stmts, line, col);
+}
+
+/* 解析 if */
+static AstNode *parse_if(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);  /* if */
+    /* 兼容两种风格：if cond { } 或 if (cond) { } */
+    AstNode *cond;
+    if (match(p, TOK_LPAREN)) {
+        cond = parse_expr(p);
+        expect(p, TOK_RPAREN, "')'");
+    } else {
+        cond = parse_expr(p);
+    }
+
+    AstNode *then_block = parse_block_real(p);
+
+    AstNode *else_block = NULL;
+    if (match(p, TOK_KW_ELSE)) {
+        if (check(p, TOK_KW_IF)) {
+            /* else if 递归 */
+            else_block = parse_if(p);
+        } else {
+            else_block = parse_block_real(p);
+        }
+    }
+
+    return ast_new_if(cond, then_block, else_block, line, col);
+}
+
+/* 解析 while */
+static AstNode *parse_while(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);  /* while */
+    /* 兼容两种风格：while cond { } 或 while (cond) { } */
+    AstNode *cond;
+    if (match(p, TOK_LPAREN)) {
+        cond = parse_expr(p);
+        expect(p, TOK_RPAREN, "')'");
+    } else {
+        cond = parse_expr(p);
+    }
+    AstNode *body = parse_block_real(p);
+    return ast_new_while(cond, body, line, col);
+}
+
+/* 解析 for */
+static AstNode *parse_for(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+    advance(p);  /* for */
+
+    if (!check(p, TOK_IDENT)) {
+        p->has_error = 1;
+        return NULL;
+    }
+    char *var = strdup(p->current.lexeme);
+    advance(p);
+
+    AstNode *body = NULL;
+
+    if (match(p, TOK_KW_IN)) {
+        /* for x in expr { } */
+        AstNode *iter = parse_expr(p);
+        body = parse_block_real(p);
+        return ast_new_for_in(var, iter, body, line, col);
+    } else if (match(p, TOK_KW_FROM)) {
+        /* for x from a to b [step s] { } */
+        AstNode *start = parse_expr(p);
+        if (!expect(p, TOK_KW_TO, "'to' 或 'downto'")) {
+            free(var);
+            return NULL;
+        }
+        AstNode *end = parse_expr(p);
+        AstNode *step = NULL;
+        if (match(p, TOK_KW_STEP)) {
+            step = parse_expr(p);
+        }
+        body = parse_block_real(p);
+        return ast_new_for_range(var, start, end, step, body, line, col);
+    } else {
+        p->has_error = 1;
+        snprintf(p->last_error.message, sizeof(p->last_error.message),
+                 "期望 'in' 或 'from' at %d:%d",
+                 p->current.line, p->current.col);
+        free(var);
+        return NULL;
+    }
+}
+
+/* 解析单条语句 */
+static AstNode *parse_stmt(Parser *p) {
+    int line = p->current.line, col = p->current.col;
+
+    switch (p->current.kind) {
+        case TOK_KW_LET:   return parse_var_decl(p, false);
+        case TOK_KW_VAR:   return parse_var_decl(p, true);
+        case TOK_KW_CONST: return parse_var_decl(p, false);
+        case TOK_KW_RETURN: return parse_return(p);
+        case TOK_KW_BREAK: return parse_break(p);
+        case TOK_KW_CONTINUE: return parse_continue(p);
+        case TOK_KW_IF:    return parse_if(p);
+        case TOK_KW_WHILE: return parse_while(p);
+        case TOK_KW_FOR:   return parse_for(p);
+        default:
+            return parse_expr_stmt(p);
+    }
+}
+
 /* ============ 类型 ============ */
 
 /* 简单类型：IDENT (可能含泛型) 或 T[RANGE] 数组类型 */
@@ -273,38 +758,7 @@ static char *parse_type(Parser *p) {
 
 /* ============ 块 ============ */
 
-/* 解析代码块： { stmt; stmt; ... } */
-/* v0.1 简化：只支持变量声明、return、表达式语句、if/while/for 的简化版 */
-static AstNode *parse_block(Parser *p) {
-    int line = p->current.line;
-    int col = p->current.col;
-    if (!expect(p, TOK_LBRACE, "'{'")) {
-        return NULL;
-    }
-
-    /* 临时：跳过块内所有 token 直到匹配的 '}' */
-    /* 第 5-6 周实现完整语句解析 */
-    int depth = 1;
-    while (depth > 0 && !check(p, TOK_EOF)) {
-        if (check(p, TOK_LBRACE)) {
-            depth++;
-            advance(p);
-        } else if (check(p, TOK_RBRACE)) {
-            depth--;
-            if (depth == 0) break;
-            advance(p);
-        } else {
-            advance(p);
-        }
-    }
-
-    if (!expect(p, TOK_RBRACE, "'}'")) {
-        return NULL;
-    }
-
-    /* 返回空块（v0.1 简化） */
-    return ast_new_block(NULL, 0, line, col);
-}
+/* 已迁移到 parse_block_real（在表达式模块之前声明）。*/
 
 /* ============ 顶层项 ============ */
 
@@ -362,7 +816,7 @@ static AstNode *parse_function(Parser *p) {
     }
 
     /* 函数体 */
-    AstNode *body = parse_block(p);
+    AstNode *body = parse_block_real(p);
 
     return ast_new_function(name, params, n_params, ret_type, body, line, col);
 }

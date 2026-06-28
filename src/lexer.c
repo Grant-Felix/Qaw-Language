@@ -49,6 +49,11 @@ static const KeywordEntry KEYWORDS[] = {
     {"panic",    TOK_KW_PANIC},
     {"unsafe",   TOK_KW_UNSAFE},
     {"as",       TOK_KW_AS},
+    {"in",       TOK_KW_IN},
+    {"from",     TOK_KW_FROM},
+    {"to",       TOK_KW_TO},
+    {"downto",   TOK_KW_DOWNTO},
+    {"step",     TOK_KW_STEP},
     {NULL, 0}
 };
 
@@ -81,6 +86,11 @@ static const char *KEYWORD_ALIASES[][5] = {
     {"panic",           "panic", "huangkong",  "hk",         NULL},
     {"unsafe",          "unsafe","weixian",    "wx",         NULL},
     {"as",              "as",    "zuowei",     "zw",         NULL},
+    {"in",              "in",    "zai",        "zai",        NULL},
+    {"from",            "from",  "cong",       "cong",       NULL},
+    {"to",              "to",    "dao",        "dao",        NULL},
+    {"downto",          "downto","daoxia",     "dx",         NULL},
+    {"step",            "step",  "buchang",    "bc",         NULL},
     {NULL, NULL, NULL, NULL, NULL}
 };
 
@@ -144,6 +154,11 @@ const char *token_kind_name(TokenKind k) {
         case TOK_KW_PANIC: return "kw_panic";
         case TOK_KW_UNSAFE: return "kw_unsafe";
         case TOK_KW_AS: return "kw_as";
+        case TOK_KW_IN: return "kw_in";
+        case TOK_KW_FROM: return "kw_from";
+        case TOK_KW_TO: return "kw_to";
+        case TOK_KW_DOWNTO: return "kw_downto";
+        case TOK_KW_STEP: return "kw_step";
 
         /* 运算符 */
         case TOK_PLUS: return "+";

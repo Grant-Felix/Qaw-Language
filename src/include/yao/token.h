@@ -46,6 +46,11 @@ typedef enum {
     TOK_KW_PANIC,      /* panic / panic / huangkong / hk */
     TOK_KW_UNSAFE,     /* unsafe / unsafe / weixian / wx */
     TOK_KW_AS,         /* as / as / zuowei / zw */
+    TOK_KW_IN,         /* in */
+    TOK_KW_FROM,       /* from */
+    TOK_KW_TO,         /* to */
+    TOK_KW_DOWNTO,     /* downto */
+    TOK_KW_STEP,       /* step */
 
     /* 运算符 */
     TOK_PLUS, TOK_MINUS, TOK_STAR, TOK_SLASH, TOK_PERCENT,
