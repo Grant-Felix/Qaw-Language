@@ -27,7 +27,7 @@ OBJS = $(SRCS:%.c=$(BUILDDIR)/%.o)
 OBJS = $(SRCS:%.c=$(BUILDDIR)/%.o)
 
 # 目标
-TARGET = $(BUILDDIR)/yaoc
+TARGET = $(BUILDDIR)/qawc
 
 # 测试
 TEST_SRCS = $(wildcard tests/*.c)

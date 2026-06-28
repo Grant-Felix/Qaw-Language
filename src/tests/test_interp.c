@@ -236,6 +236,165 @@ static int test_comparison(void) {
     return 1;
 }
 
+static int test_if_statement(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let x = 5\n"
+        "    if x > 3 {\n"
+        "        print(\"big\")\n"
+        "    } else {\n"
+        "        print(\"small\")\n"
+        "    }\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "big") != NULL);
+    ASSERT(strstr(buf, "small") == NULL);
+    return 1;
+}
+
+static int test_while_loop(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let i = 0\n"
+        "    let sum = 0\n"
+        "    while i < 5 {\n"
+        "        sum = sum + i\n"
+        "        i = i + 1\n"
+        "    }\n"
+        "    print(sum)\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    /* 0+1+2+3+4 = 10 */
+    ASSERT(strstr(buf, "10") != NULL);
+    return 1;
+}
+
+static int test_for_range(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let sum = 0\n"
+        "    for i from 1 to 5 {\n"
+        "        sum = sum + i\n"
+        "    }\n"
+        "    print(sum)\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    /* 1+2+3+4+5 = 15 */
+    ASSERT(strstr(buf, "15") != NULL);
+    return 1;
+}
+
+static int test_break(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let i = 0\n"
+        "    while i < 100 {\n"
+        "        if i == 5 { break }\n"
+        "        i = i + 1\n"
+        "    }\n"
+        "    print(i)\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "5") != NULL);
+    return 1;
+}
+
+static int test_function_call(void) {
+    const char *src =
+        "func add(x: int, y: int) -> int {\n"
+        "    return x + y\n"
+        "}\n"
+        "func main() -> void {\n"
+        "    print(add(3, 4))\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "7") != NULL);
+    return 1;
+}
+
+static int test_function_local_scope(void) {
+    const char *src =
+        "func double_it(x: int) -> int {\n"
+        "    let result = x * 2\n"
+        "    return result\n"
+        "}\n"
+        "func main() -> void {\n"
+        "    let x = 5\n"
+        "    print(double_it(x))\n"
+        "    print(x)\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "10") != NULL);
+    ASSERT(strstr(buf, "5") != NULL);
+    return 1;
+}
+
+static int test_string_interp_simple(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let name = \"世界\"\n"
+        "    print(\"你好, ${name}!\")\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "你好, 世界!") != NULL);
+    return 1;
+}
+
+static int test_string_interp_expression(void) {
+    const char *src =
+        "func main() -> void {\n"
+        "    let a = 5\n"
+        "    let b = 3\n"
+        "    print(\"${a} + ${b} = ${a + b}\")\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "5 + 3 = 8") != NULL);
+    return 1;
+}
+
+static int test_four_form_runs(void) {
+    /* 完整 four-form.yao 应能成功运行（4 个函数 + main 调用） */
+    const char *src =
+        "package four_form\n"
+        "\n"
+        "baozhuang four_form\n"
+        "\n"
+        "func english() { print(\"english\") }\n"
+        "fn abbrev() { print(\"abbrev\") }\n"
+        "hanshu pinyin_full() { print(\"pinyin_full\") }\n"
+        "hs pinyin_init() { print(\"pinyin_init\") }\n"
+        "func main() {\n"
+        "    english()\n"
+        "    abbrev()\n"
+        "    pinyin_full()\n"
+        "    pinyin_init()\n"
+        "}\n";
+    char buf[1024];
+    int rc = run_capture(src, buf, sizeof(buf));
+    ASSERT(rc == 0);
+    ASSERT(strstr(buf, "english") != NULL);
+    ASSERT(strstr(buf, "abbrev") != NULL);
+    ASSERT(strstr(buf, "pinyin_full") != NULL);
+    ASSERT(strstr(buf, "pinyin_init") != NULL);
+    return 1;
+}
+
 int main(void) {
     fprintf(stderr, "=== yaoc Interpreter 端到端测试 ===\n");
 
@@ -249,6 +408,23 @@ int main(void) {
     TEST(string_concat);
     TEST(unary);
     TEST(comparison);
+
+    /* 控制流 */
+    TEST(if_statement);
+    TEST(while_loop);
+    TEST(for_range);
+    TEST(break);
+
+    /* 函数调用 */
+    TEST(function_call);
+    TEST(function_local_scope);
+
+    /* 字符串插值 */
+    TEST(string_interp_simple);
+    TEST(string_interp_expression);
+
+    /* 完整 four-form */
+    TEST(four_form_runs);
 
     fprintf(stderr, "\n=== %d/%d 通过 ===\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;

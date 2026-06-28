@@ -78,8 +78,8 @@ static const char *KEYWORD_ALIASES[][5] = {
     {"break",           "brk",   "tiaochu",    "tc",         NULL},
     {"continue",        "cnt",   "jixu",       "jx",         NULL},
     {"match",           "match", "pipei",      "pp",         NULL},
-    {"true",            "true",  "zhen",       "z",          NULL},
-    {"false",           "fls",   "jia",        "j",          NULL},
+    {"true",            "true",  "zhen",       "zh",         NULL},
+    {"false",           "fls",   "jia",        "ji",         NULL},
     {"defer",           "def",   "yanchi",     "yc",         NULL},
     {"go",              "go",    "xiecheng",   "xc",         NULL},
     {"chan",            "chan",  "tongdao",    "td",         NULL},
@@ -396,8 +396,8 @@ static Token lex_ident_or_keyword(Lexer *l) {
     return token_new(TOK_IDENT, s, len, start_line, start_col);
 }
 
-/* 读取整数 */
-static Token lex_int(Lexer *l) {
+/* 读取整数或浮点 */
+static Token lex_number(Lexer *l) {
     int start_line = l->line;
     int start_col = l->col;
     size_t start = l->pos;
@@ -406,9 +406,39 @@ static Token lex_int(Lexer *l) {
         advance_char(l);
     }
 
-    /* 处理后缀（i32, u64 等） */
-    if (peek_char(l) == 'i' || peek_char(l) == 'u' || peek_char(l) == 'f') {
+    int is_float = 0;
+
+    /* 小数点（必须是 . 后跟数字才算浮点） */
+    if (peek_char(l) == '.' && peek_char_next(l) != -1 &&
+        isdigit(peek_char_next(l))) {
+        is_float = 1;
+        advance_char(l);  /* . */
+        while (peek_char(l) != -1 && isdigit(peek_char(l))) {
+            advance_char(l);
+        }
+    }
+
+    /* 指数 e / E */
+    if (peek_char(l) == 'e' || peek_char(l) == 'E') {
+        is_float = 1;
+        advance_char(l);
+        if (peek_char(l) == '+' || peek_char(l) == '-') {
+            advance_char(l);
+        }
+        while (peek_char(l) != -1 && isdigit(peek_char(l))) {
+            advance_char(l);
+        }
+    }
+
+    /* 后缀（i32, u64, f32） */
+    if (!is_float &&
+        (peek_char(l) == 'i' || peek_char(l) == 'u' || peek_char(l) == 'f')) {
         int c = peek_char(l);
+        advance_char(l);
+        while (peek_char(l) != -1 && isdigit(peek_char(l))) {
+            advance_char(l);
+        }
+    } else if (is_float && (peek_char(l) == 'f')) {
         advance_char(l);
         while (peek_char(l) != -1 && isdigit(peek_char(l))) {
             advance_char(l);
@@ -416,10 +446,17 @@ static Token lex_int(Lexer *l) {
     }
 
     size_t len = l->pos - start;
+    if (is_float) {
+        return token_new(TOK_FLOAT_LIT, l->source + start, len, start_line, start_col);
+    }
     return token_new(TOK_INT_LIT, l->source + start, len, start_line, start_col);
 }
 
-/* 读取字符串字面量 */
+/* 读取字符串字面量
+ *
+ * v0.1 简化：词法层只识别整体字符串，${} 插值在运行时解析
+ */
+
 static Token lex_string(Lexer *l) {
     int start_line = l->line;
     int start_col = l->col;
@@ -427,10 +464,15 @@ static Token lex_string(Lexer *l) {
 
     advance_char(l);  /* " */
 
+    char *buf = (char *)malloc(256);
+    size_t cap = 256, len = 0;
+    buf[0] = '\0';
+
     while (1) {
         int c = peek_char(l);
         if (c == -1) {
             lex_error(l, "未闭合的字符串");
+            free(buf);
             return token_new(TOK_ERROR, l->source + start, l->pos - start, start_line, start_col);
         }
         if (c == '"') {
@@ -442,16 +484,47 @@ static Token lex_string(Lexer *l) {
             int next = peek_char(l);
             if (next == -1) {
                 lex_error(l, "字符串末尾的反斜杠");
+                free(buf);
                 return token_new(TOK_ERROR, l->source + start, l->pos - start, start_line, start_col);
             }
             advance_char(l);  /* 跳过转义字符 */
+            char ch;
+            switch (next) {
+                case 'n': ch = '\n'; break;
+                case 't': ch = '\t'; break;
+                case 'r': ch = '\r'; break;
+                case '\\': ch = '\\'; break;
+                case '"': ch = '"'; break;
+                case '$': ch = '$'; break;
+                default: ch = (char)next; break;
+            }
+            if (len + 1 >= cap) {
+                cap *= 2;
+                buf = (char *)realloc(buf, cap);
+            }
+            buf[len++] = ch;
+            buf[len] = '\0';
             continue;
         }
+        /* 普通字符：原样保留（含 ${} 文本，运行时再切分） */
+        if (len + 1 >= cap) {
+            cap *= 2;
+            buf = (char *)realloc(buf, cap);
+        }
+        buf[len++] = (char)c;
+        buf[len] = '\0';
         advance_char(l);
     }
 
-    size_t len = l->pos - start;
-    return token_new(TOK_STRING_LIT, l->source + start, len, start_line, start_col);
+    size_t total_len = l->pos - start;
+    /* 合并 buf 到 lexeme（用更高效的存储：直接 copy 源） */
+    free(buf);
+    char *lexeme = (char *)malloc(total_len + 1);
+    memcpy(lexeme, l->source + start, total_len);
+    lexeme[total_len] = '\0';
+    Token t = token_new(TOK_STRING_LIT, lexeme, total_len, start_line, start_col);
+    free(lexeme);
+    return t;
 }
 
 /* 主扫描函数 */
@@ -480,7 +553,7 @@ Token lexer_next(Lexer *l) {
 
     /* 数字 */
     if (isdigit(c)) {
-        return lex_int(l);
+        return lex_number(l);
     }
 
     /* 字符串 */

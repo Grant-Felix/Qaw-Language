@@ -522,6 +522,11 @@ static AstNode *parse_expr(Parser *p) {
     return parse_expr_bp(p, 0);
 }
 
+/* 公开的单个表达式解析入口（供字符串插值使用） */
+AstNode *parser_parse_expr(Parser *p) {
+    return parse_expr(p);
+}
+
 /* ============ 语句 ============ */
 
 /* 解析类型注解（可选） */

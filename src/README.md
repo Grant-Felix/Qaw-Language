@@ -9,7 +9,7 @@ v0.1 POC 引导版（C / C++ 实现）。
 ```
 src/
 ├── Makefile              # 构建脚本
-├── include/yao/          # 公开头文件
+├── include/qaw/          # 公开头文件
 │   ├── token.h           # Token 类型
 │   ├── lexer.h           # 词法分析器
 │   ├── ast.h             # AST 节点
@@ -34,8 +34,8 @@ make clean     # 清理
 ## 运行
 
 ```bash
-./yaoc run examples/hello.yao    # 编译并运行
-./yaoc check examples/hello.yao   # 仅词法+语法检查
+./qawc run examples/hello.qaw    # 编译并运行
+./qawc check examples/hello.qaw   # 仅词法+语法检查
 ```
 
 ## 当前状态

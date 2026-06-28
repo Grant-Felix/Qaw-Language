@@ -40,6 +40,11 @@ void parser_free(Parser *p);
 /* 顶层入口：解析整个程序 */
 AstNode *parser_parse_program(Parser *p);
 
+/* 解析单个表达式（用于字符串插值等）
+ * 返回的 AST 由调用者负责释放
+ */
+AstNode *parser_parse_expr(Parser *p);
+
 /* 错误信息访问 */
 const ParseError *parser_last_error(const Parser *p);
 

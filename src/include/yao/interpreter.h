@@ -15,6 +15,8 @@ typedef enum {
     EVAL_ERR_TYPE,
     EVAL_ERR_DIV_BY_ZERO,
     EVAL_ERR_RUNTIME,
+    EVAL_ERR_BREAK,        /* break 命中（不在循环内） */
+    EVAL_ERR_RETURN,       /* return 命中（不在函数内） */
 } EvalStatus;
 
 typedef struct {
@@ -26,7 +28,7 @@ typedef struct {
 /* 全局求值：表达式 */
 EvalResult eval_expr(AstNode *expr, Env *env);
 
-/* 全局执行：语句（用于 -run 命令） */
+/* 全局执行：程序 */
 EvalStatus interp_exec_program(AstNode *program, Env *env);
 
 /* EvalResult 构造器 */

@@ -27,7 +27,7 @@ static void usage(void) {
         "  help            显示帮助\n"
         "\n"
         "示例:\n"
-        "  yaoc run examples/hello.yao\n");
+        "  qawc run examples/hello.qaw\n");
 }
 
 static char *read_file(const char *path) {
