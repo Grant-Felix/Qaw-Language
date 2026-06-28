@@ -1,7 +1,7 @@
 /*
- * main.c — yaoc 入口
+ * main.c — qawc 入口
  *
- * 妖语言 v0.1 POC 引导版
+ * 妖语言 v0.5 MVP：C 代码生成后端
  */
 
 #include "yao/lexer.h"
@@ -9,25 +9,28 @@
 #include "yao/ast.h"
 #include "yao/interpreter.h"
 #include "yao/env.h"
+#include "yao/codegen.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void usage(void) {
     fprintf(stderr,
-        "用法: yaoc <command> [options] <file>\n"
+        "用法: qawc <command> [options] <file>\n"
         "\n"
         "命令:\n"
         "  lex <file>      词法分析并打印 Token 列表\n"
         "  parse <file>    解析为 AST 并打印\n"
-        "  run <file>      解析并执行（目前仅 main 函数内的表达式语句）\n"
-        "  check <file>    解析检查\n"
+        "  run <file>      解析并执行（Tree-walking 解释器）\n"
+        "  build <file>    编译为原生可执行文件（C 后端）\n"
         "  version         打印版本\n"
         "  help            显示帮助\n"
         "\n"
         "示例:\n"
-        "  qawc run examples/hello.qaw\n");
+        "  qawc run examples/hello.qaw\n"
+        "  qawc build examples/hello.qaw -o hello\n");
 }
 
 static char *read_file(const char *path) {
@@ -178,6 +181,52 @@ static int cmd_run(const char *path) {
     return exit_code;
 }
 
+/* build 命令：解析 + 生成 C + 调 gcc 编译 */
+static int cmd_build(const char *src_path, const char *out_path) {
+    char *src = read_file(src_path);
+    if (!src) return 1;
+
+    Lexer *lex = lexer_new(src);
+    Parser *p = parser_new(lex);
+    AstNode *program = parser_parse_program(p);
+
+    int exit_code = 0;
+    if (!program) {
+        const ParseError *err = parser_last_error(p);
+        fprintf(stderr, "解析失败:\n");
+        if (err) fprintf(stderr, "  %d:%d: %s\n", err->line, err->col, err->message);
+        exit_code = 1;
+    } else {
+        char *c_code = qaw_codegen_to_c(program);
+        if (!c_code) {
+            fprintf(stderr, "代码生成失败\n");
+            exit_code = 1;
+        } else {
+            /* 生成 .c 文件 */
+            char c_path[1024];
+            snprintf(c_path, sizeof(c_path), "%s.c", out_path);
+            if (qaw_codegen_write_file(c_code, c_path) == 0) {
+                /* 编译 */
+                if (qaw_codegen_compile_c(c_path, out_path) == 0) {
+                    /* 清理 .c 中间文件（可选） */
+                    unlink(c_path);
+                } else {
+                    exit_code = 1;
+                }
+            } else {
+                exit_code = 1;
+            }
+            free(c_code);
+        }
+        ast_free(program);
+    }
+
+    parser_free(p);
+    lexer_free(lex);
+    free(src);
+    return exit_code;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         usage();
@@ -185,7 +234,7 @@ int main(int argc, char **argv) {
     }
 
     if (strcmp(argv[1], "version") == 0) {
-        printf("yaoc v0.1 POC\n");
+        printf("qawc v0.5 MVP\n");
         return 0;
     }
 
@@ -203,12 +252,22 @@ int main(int argc, char **argv) {
             usage();
             return 1;
         }
-if (strcmp(cmd, "lex") == 0) return cmd_lex(path);
+    }
+    if (strcmp(cmd, "lex") == 0) return cmd_lex(path);
     if (strcmp(cmd, "parse") == 0 || strcmp(cmd, "check") == 0) return cmd_parse(path);
     if (strcmp(cmd, "run") == 0) return cmd_run(path);
+    if (strcmp(cmd, "build") == 0) {
+        /* 找到 -o 参数 */
+        const char *out_path = "a.out";
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+                out_path = argv[++i];
+            }
+        }
+        return cmd_build(path, out_path);
+    }
     /* 旧兼容 */
     return cmd_parse(path);
-    }
 
     fprintf(stderr, "未知命令: %s\n", argv[1]);
     usage();
