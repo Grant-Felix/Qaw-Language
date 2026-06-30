@@ -1,0 +1,6 @@
+// qawpm-demo/main.qaw — 演示项目入口
+
+func main() {
+    print("qawpm-demo 启动");
+    print("这是 qawpm init 生成的样例项目");
+}

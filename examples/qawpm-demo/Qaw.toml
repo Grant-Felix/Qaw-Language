@@ -1,0 +1,8 @@
+[package]
+name = "qawpm-demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+qaw_std = "1.0"
+# qaw_http = "2.1"
