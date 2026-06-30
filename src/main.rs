@@ -5,6 +5,12 @@
 //! - parse <file>     解析为 AST 并打印
 //! - run <file>       解释执行
 //! - build <file>     编译为原生可执行文件（C 后端）
+//!
+//! Crate 级别允许 dead_code：v0.1 故意"超规格"实现 AST / Token / Value API
+//! （含未来 v0.5+ 才启用的字段与变体），当前解释器尚未全部使用。
+//! 见 docs/2-版本更新一览.md 与 docs/book/ 蓝图。
+
+#![allow(dead_code)]
 
 use std::process::ExitCode;
 
