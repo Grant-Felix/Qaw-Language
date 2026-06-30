@@ -21,7 +21,7 @@ use std::fmt;
 // #[allow(unused_imports)]：本 crate 是 binary crate，无外部用户，
 // re-export 仅服务内部 `super::*` 调用与未来可能的 library 化。
 #[allow(unused_imports)]
-pub use literal::{interp_expr, interp_text, new_bool_lit, new_char_lit, new_float_lit, new_ident, new_int_lit, new_string_lit, string_lit_simple, InterpPart, StringLit};
+pub use literal::{interp_expr, interp_text, new_array_lit, new_bool_lit, new_char_lit, new_float_lit, new_ident, new_int_lit, new_string_lit, string_lit_simple, InterpPart, StringLit};
 #[allow(unused_imports)]
 pub use expr::{
     new_binary, new_call, new_field_access, new_index, new_slice, new_unary, BinOp, BinaryOp,
@@ -29,9 +29,10 @@ pub use expr::{
 };
 #[allow(unused_imports)]
 pub use stmt::{
-    new_assign, new_block, new_break, new_continue, new_expr_stmt, new_for_in, new_for_range,
-    new_if, new_match, new_return, new_var_decl, new_while, Assign, Block, ExprStmt, ForKind,
-    ForStmt, IfStmt, MatchArm, MatchStmt, ReturnStmt, VarDecl, WhileStmt,
+    new_assign, new_block, new_break, new_continue, new_defer, new_expr_stmt, new_for_in,
+    new_for_range, new_if, new_match, new_return, new_var_decl, new_while, Assign, Block,
+    DeferStmt, ExprStmt, ForKind, ForStmt, IfStmt, MatchArm, MatchStmt, ReturnStmt, VarDecl,
+    WhileStmt,
 };
 #[allow(unused_imports)]
 pub use decl::{
@@ -48,6 +49,7 @@ pub enum Kind {
     StringLit,
     BoolLit,
     CharLit,
+    ArrayLit,
     Ident,
     // 表达式
     BinaryOp,
@@ -68,6 +70,7 @@ pub enum Kind {
     BreakStmt,
     ContinueStmt,
     MatchStmt,
+    DeferStmt,
     // 声明
     Function,
     StructDecl,
@@ -86,6 +89,7 @@ pub enum ExprData {
     StringLit(StringLit),
     BoolLit(bool),
     CharLit(i32),
+    ArrayLit(Vec<Expr>),
     Ident(String),
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
@@ -104,6 +108,7 @@ pub enum ExprData {
     BreakStmt,
     ContinueStmt,
     MatchStmt(MatchStmt),
+    DeferStmt(DeferStmt),
     Function(Function),
     StructDecl(StructDecl),
     EnumDecl(EnumDecl),
@@ -192,6 +197,10 @@ pub fn print_expr(node: &Expr, indent: usize) {
         ExprData::FloatLit(v) => println!(" = {}", v),
         ExprData::BoolLit(v) => println!(" = {}", v),
         ExprData::CharLit(v) => println!(" = U+{:04X}", v),
+        ExprData::ArrayLit(items) => {
+            println!(" items={}", items.len());
+            for it in items { print_expr(it, indent + 2); }
+        }
         ExprData::Ident(s) => println!(" name={}", s),
         ExprData::StringLit(s) => {
             println!(" parts={}", s.parts.len());
@@ -282,6 +291,10 @@ pub fn print_expr(node: &Expr, indent: usize) {
                 println!("{}  pattern={:?}", pad, arm.pattern);
                 print_expr(&arm.body, indent + 2);
             }
+        }
+        ExprData::DeferStmt(d) => {
+            println!();
+            print_expr(&d.expr, indent + 2);
         }
         ExprData::Function(f) => {
             println!(" name={} params={}", f.name, f.params.len());

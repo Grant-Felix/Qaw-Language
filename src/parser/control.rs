@@ -1,8 +1,11 @@
-//! parse_if / parse_while / parse_for / parse_match — 控制流语句
+//! parse_if / parse_while / parse_for / parse_match / parse_defer — 控制流语句
 
 use super::Parser;
 use super::free_var;
-use crate::ast::{match_arm, new_block, new_for_in, new_for_range, new_if, new_match, new_while, Expr};
+use crate::ast::{
+    match_arm, new_block, new_defer, new_for_in, new_for_range, new_if, new_match, new_while,
+    Expr,
+};
 use crate::lexer::TokKind;
 
 impl Parser {
@@ -140,5 +143,15 @@ impl Parser {
         }
         self.expect(TokKind::RBrace, "'}'");
         new_match(scrutinee, arms, line, col)
+    }
+
+    /// 解析 `defer expr;`（A10）。
+    pub(super) fn parse_defer(&mut self) -> Expr {
+        let line = self.current.line;
+        let col = self.current.col;
+        self.advance(); // defer
+        let expr = self.parse_expr();
+        self.match_tok(TokKind::Semi);
+        new_defer(expr, line, col)
     }
 }

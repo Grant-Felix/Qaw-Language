@@ -197,6 +197,7 @@ impl Parser {
             TokKind::KwWhile => Some(self.parse_while()),
             TokKind::KwFor => Some(self.parse_for()),
             TokKind::KwMatch => Some(self.parse_match()),
+            TokKind::KwDefer => Some(self.parse_defer()),
             _ => Some(self.parse_expr_stmt()),
         }
     }

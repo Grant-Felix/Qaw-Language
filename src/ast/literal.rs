@@ -41,6 +41,10 @@ pub fn new_ident(name: String, line: u32, col: u32) -> Expr {
     Expr { kind: Kind::Ident, line, col, data: ExprData::Ident(name) }
 }
 
+pub fn new_array_lit(items: Vec<Expr>, line: u32, col: u32) -> Expr {
+    Expr { kind: Kind::ArrayLit, line, col, data: ExprData::ArrayLit(items) }
+}
+
 pub fn interp_text(text: &str) -> InterpPart {
     InterpPart::Text(text.to_string())
 }

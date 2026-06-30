@@ -119,14 +119,22 @@ impl Parser {
                     let line = self.current.line;
                     let col = self.current.col;
                     self.advance(); // [
-                    let start = if !self.check(TokKind::Colon) && !self.check(TokKind::RBracket) {
+                    // 仅当下一个 token 是表达式起点时才尝试解析 start。
+                    // Colon(:) / DotDot(..) / DotDotEq(..=) / RBracket(]) 都表示"无 start"切片。
+                    let start = if !self.check(TokKind::Colon)
+                        && !self.check(TokKind::RBracket)
+                        && !self.check(TokKind::DotDot)
+                        && !self.check(TokKind::DotDotEq)
+                    {
                         Some(self.parse_expr())
                     } else {
                         None
                     };
                     let mut end = None;
                     let mut inclusive = false;
+                    let mut is_slice = false;
                     if self.match_tok(TokKind::Colon) {
+                        is_slice = true;
                         if !self.check(TokKind::RBracket) && !self.check(TokKind::DotDotEq) {
                             end = Some(self.parse_expr());
                         }
@@ -137,21 +145,28 @@ impl Parser {
                             }
                         }
                     } else if self.match_tok(TokKind::DotDot) {
+                        is_slice = true;
                         inclusive = false;
                         if !self.check(TokKind::RBracket) {
                             end = Some(self.parse_expr());
                         }
-                    } else if end.is_none() {
-                        // 纯索引
+                    } else if self.match_tok(TokKind::DotDotEq) {
+                        is_slice = true;
+                        inclusive = true;
+                        if !self.check(TokKind::RBracket) {
+                            end = Some(self.parse_expr());
+                        }
+                    } else if start.is_none() {
+                        // 无 start 且无 .. 也不是 Colon — 视为语法错误
+                        self.error("期望 '..' 或 ':' 或 ']'");
                     }
                     self.expect(TokKind::RBracket, "']'");
-                    if end.is_none() {
-                        // 索引
-                        if let Some(idx) = start {
-                            expr = new_index(expr, idx, line, col);
-                        }
-                    } else {
+                    if is_slice {
+                        // 切片：start 可选、end 可选、inclusive 由 .. / ..= 决定
                         expr = new_slice(expr, start, end, inclusive, line, col);
+                    } else if let Some(idx) = start {
+                        // 纯索引
+                        expr = new_index(expr, idx, line, col);
                     }
                 }
                 _ => break,

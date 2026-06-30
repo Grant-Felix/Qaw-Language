@@ -75,6 +75,12 @@ pub struct MatchStmt {
     pub arms: Vec<MatchArm>,
 }
 
+/// `defer expr;` —— 函数退出前按 LIFO 顺序执行的延迟表达式（A10）。
+#[derive(Debug, Clone)]
+pub struct DeferStmt {
+    pub expr: Box<Expr>,
+}
+
 // ============ 构造器 ============
 
 pub fn new_var_decl(
@@ -238,5 +244,15 @@ pub fn new_match(
             scrutinee: Box::new(scrutinee),
             arms,
         }),
+    }
+}
+
+/// 构造 `defer expr;` 节点（A10）。
+pub fn new_defer(expr: Expr, line: u32, col: u32) -> Expr {
+    Expr {
+        kind: Kind::DeferStmt,
+        line,
+        col,
+        data: ExprData::DeferStmt(DeferStmt { expr: Box::new(expr) }),
     }
 }

@@ -1,11 +1,11 @@
-//! parse_primary — 字面量 / 标识符 / 括号表达式
+//! parse_primary — 字面量 / 标识符 / 括号表达式 / 数组字面量
 
 use super::Parser;
-use crate::ast::{new_bool_lit, new_char_lit, new_float_lit, new_ident, new_int_lit, new_string_lit, Expr, ExprData, Kind};
+use crate::ast::{new_array_lit, new_bool_lit, new_char_lit, new_float_lit, new_ident, new_int_lit, new_string_lit, Expr, ExprData, Kind};
 use crate::lexer::TokKind;
 
 impl Parser {
-    /// 基本元素：字面量、标识符、括号表达式
+    /// 基本元素：字面量、标识符、括号表达式、数组字面量
     pub(super) fn parse_primary(&mut self) -> Expr {
         let line = self.current.line;
         let col = self.current.col;
@@ -57,6 +57,21 @@ impl Parser {
                 let e = self.parse_expr();
                 self.expect(TokKind::RParen, "')'");
                 e
+            }
+            TokKind::LBracket => {
+                // 数组字面量：[a, b, c]（A5）
+                self.advance(); // [
+                let mut items = Vec::new();
+                if !self.check(TokKind::RBracket) {
+                    loop {
+                        items.push(self.parse_expr());
+                        if !self.match_tok(TokKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(TokKind::RBracket, "']'");
+                new_array_lit(items, line, col)
             }
             _ => {
                 self.error(&format!("期望表达式，得到 {:?}", kind));
