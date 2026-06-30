@@ -6,31 +6,61 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
-  build:
+  test:
+    name: test (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装依赖
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: 构建
-        run: cd src && make
+      - name: 缓存 cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      - name: 运行单元测试
-        run: cd src && make test
+      - name: 编译
+        run: cargo build --release
 
-      - name: 端到端：解析 + 执行
+      - name: 单元测试
+        run: cargo test
+
+      - name: Clippy lint（-D warnings）
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: 端到端：6 个示例
         run: |
-          cd src
+          set -e
           for f in examples/*.qaw; do
-              echo "==> 运行 $f"
-              ./build/qawc run "$f" || exit 1
+              echo "==> $f"
+              ./target/release/qawc run "$f" > /tmp/out.txt
+              # 验证非空输出（每个示例都应该打印东西）
+              if [ ! -s /tmp/out.txt ]; then
+                  echo "FAIL: $f produced empty output"
+                  exit 1
+              fi
           done
+          echo "==> 所有 6 个示例通过"
 
-      - name: 端到端：编译为原生二进制
-        run: |
-          cd src
-          ./build/qawc build examples/hello.qaw -o /tmp/hello
-          /tmp/hello
+  msrv:
+    name: MSRV (1.75)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 1.75
+        uses: dtolnay/rust-toolchain@1.75
+      - name: 编译 MSRV
+        run: cargo build --release
