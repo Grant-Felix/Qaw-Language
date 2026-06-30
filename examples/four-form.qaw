@@ -1,0 +1,15 @@
+// four-form.qaw — 四形制关键字演示
+// 同一个关键字可以用 4 种等价写法
+
+func main() {
+    // let = bk = 不克
+    let a: int = 1;
+    bk b: int = 2;
+    let c = a + b;
+    print("英文: ${a} + ${b} = ${c}");
+
+    // for from..to
+    for x from 1 to 3 {
+        print("循环: x = ${x}");
+    }
+}

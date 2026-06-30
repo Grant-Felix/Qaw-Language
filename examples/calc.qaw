@@ -1,0 +1,24 @@
+// calc.qaw — 四则运算计算器
+// 由于 match 暂不支持 char 字面量模式，使用 if/else 链代替
+
+func calc(a: int, b: int, op: int) -> int {
+    if op == 1 { return a + b; }
+    if op == 2 { return a - b; }
+    if op == 3 { return a * b; }
+    if op == 4 {
+        if b == 0 { return 0; }
+        return a / b;
+    }
+    return 0;
+}
+
+func main() {
+    let r1 = calc(3, 4, 1);
+    let r2 = calc(10, 2, 3);
+    let r3 = calc(7, 2, 2);
+    let r4 = calc(9, 3, 4);
+    print("3 + 4 = ${r1}");
+    print("10 * 2 = ${r2}");
+    print("7 - 2 = ${r3}");
+    print("9 / 3 = ${r4}");
+}

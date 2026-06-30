@@ -1,0 +1,4 @@
+// hello.qaw — 最简 Hello World
+func main() {
+    print("你好, 世界! 🌍");
+}

@@ -1,0 +1,27 @@
+// shapes.qaw — enum / 模式匹配演示（结构体字段访问留待 v0.5）
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+func describe(c: int) -> int {
+    match c {
+        0 => 100,
+        1 => 200,
+        2 => 300,
+        _ => -1,
+    }
+}
+
+func main() {
+    let r = describe(0);
+    let g = describe(1);
+    let b = describe(2);
+    let u = describe(9);
+    print("Red 编码 = ${r}");
+    print("Green 编码 = ${g}");
+    print("Blue 编码 = ${b}");
+    print("未知 编码 = ${u}");
+}
