@@ -1289,7 +1289,7 @@ mod tests {
     fn test_array_len_method() {
         let r = run("func main() { let arr = [1, 2, 3]; arr.len() }");
         expect_int(&r, 3);
-        let r = run("func main() { let arr: int[] = []; arr.len() }"); // 语法不直接支持空数组字面量 []——下面用 []
+        let _r = run("func main() { let arr: int[] = []; arr.len() }"); // 语法不直接支持空数组字面量 []——下面用 []
         // 注：当前 [] 在 parser 里被识别为空数组字面量 [T]，而非 generic type 标注
         let r = run("func main() { let arr = [42]; arr.len() }");
         expect_int(&r, 1);
