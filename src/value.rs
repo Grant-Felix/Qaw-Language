@@ -13,9 +13,19 @@ pub enum ValueKind {
 }
 
 impl ValueKind {
+    /// 类型名（用于错误信息）
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ValueKind::Int => "int",
+            ValueKind::Float => "float",
+            ValueKind::Bool => "bool",
+            ValueKind::String => "string",
+            ValueKind::Nil => "nil",
+        }
+    }
 }
 
-// 值（tagged union）
+/// 值（tagged union）
 #[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
@@ -27,6 +37,13 @@ pub enum Value {
 
 // 提供字符串访问
 impl Value {
+    /// 转为字符串表示
+    pub fn as_str(&self) -> &str {
+        match self {
+            Value::String(s) => s,
+            _ => "",
+        }
+    }
 }
 
 impl Value {

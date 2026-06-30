@@ -51,6 +51,8 @@ pub enum EvalError {
     ForRangeMissingStart,
     /// for-range 循环缺少 end 表达式
     ForRangeMissingEnd,
+    /// 在某类型上调用了不存在的方法
+    UnknownMethod { receiver_type: String, method: String },
 }
 
 impl std::fmt::Display for EvalError {
@@ -72,6 +74,9 @@ impl std::fmt::Display for EvalError {
             Self::ForInMissingIterable => write!(f, "for-in 缺少 iterable 表达式"),
             Self::ForRangeMissingStart => write!(f, "for-range 缺少 start 表达式"),
             Self::ForRangeMissingEnd => write!(f, "for-range 缺少 end 表达式"),
+            Self::UnknownMethod { receiver_type, method } => {
+                write!(f, "{} 类型没有方法 '{}'", receiver_type, method)
+            }
         }
     }
 }
@@ -296,7 +301,18 @@ impl Interpreter {
                 return self.eval_print(c);
             }
         }
-
+        // 方法调用：c.func 是 FieldAccess（v0.11+，A4 字符串基础操作）
+        if let ExprData::FieldAccess(fa) = &c.func.data {
+            let recv = self.eval_expr_inner(&fa.obj);
+            if recv.status != EvalStatus::Ok { return recv; }
+            if let Some(r) = self.eval_method_call(&recv.value, &fa.field, &c.args) {
+                return r;
+            }
+            return eval_err(EvalError::UnknownMethod {
+                receiver_type: recv.value.kind().as_str().to_string(),
+                method: fa.field.clone(),
+            });
+        }
         // 用户函数
         let func_expr = {
             if let ExprData::Ident(name) = &c.func.data {
@@ -349,6 +365,7 @@ impl Interpreter {
             EvalStatus::Ok => body_result,
         }
     }
+
     fn eval_print(&mut self, c: &Call) -> EvalResult {
         for (i, arg) in c.args.iter().enumerate() {
             let r = self.eval_expr_inner(arg);
@@ -630,6 +647,102 @@ fn int_neg(a: i64) -> i64 {
     }
 }
 
+// ============ A4 字符串基础操作 ============
+//
+// 设计：方法调用通过 `Call { func: FieldAccess { obj, field }, args }` 模式分发。
+// 当前仅实现 `Value::String` 的方法（v0.11 第一批）：
+//   len / len_bytes / concat / contains / starts_with / ends_with / slice
+// 其他类型的方法在后续版本按 trait / extension 引入。
+
+impl Interpreter {
+    /// 方法分发入口。
+    ///
+    /// 返回 `Some(result)` 表示方法被识别（无论结果成功还是错误），
+    /// 返回 `None` 表示该方法在接收者类型上不存在，外层应报 `UnknownMethod`。
+    fn eval_method_call(
+        &mut self,
+        receiver: &Value,
+        method: &str,
+        args: &[Expr],
+    ) -> Option<EvalResult> {
+        match receiver {
+            Value::String(s) => self.eval_string_method(s, method, args),
+            _ => None,
+        }
+    }
+
+    /// 字符串方法分派。返回 `None` 表示方法名不在本类型的方法表里。
+    fn eval_string_method(
+        &mut self,
+        s: &str,
+        method: &str,
+        args: &[Expr],
+    ) -> Option<EvalResult> {
+        // 先评估参数（与 Python 风格一致：先 receiver，再 args）
+        let mut arg_vals: Vec<Value> = Vec::with_capacity(args.len());
+        for arg in args {
+            let r = self.eval_expr_inner(arg);
+            if r.status != EvalStatus::Ok { return Some(r); }
+            arg_vals.push(r.value);
+        }
+
+        let arity_err = |expected: usize| -> EvalResult {
+            eval_err(EvalError::ArgumentCountMismatch {
+                expected,
+                got: arg_vals.len(),
+            })
+        };
+
+        match method {
+            "len" | "length" => {
+                if !arg_vals.is_empty() { return Some(arity_err(0)); }
+                Some(eval_ok(val_int(s.chars().count() as i64)))
+            }
+            "len_bytes" => {
+                if !arg_vals.is_empty() { return Some(arity_err(0)); }
+                Some(eval_ok(val_int(s.len() as i64)))
+            }
+            "concat" => {
+                if arg_vals.len() != 1 { return Some(arity_err(1)); }
+                let other = arg_vals[0].to_string();
+                Some(eval_ok(val_string(format!("{}{}", s, other))))
+            }
+            "contains" => {
+                if arg_vals.len() != 1 { return Some(arity_err(1)); }
+                let needle = arg_vals[0].to_string();
+                Some(eval_ok(val_bool(s.contains(&needle))))
+            }
+            "starts_with" => {
+                if arg_vals.len() != 1 { return Some(arity_err(1)); }
+                let prefix = arg_vals[0].to_string();
+                Some(eval_ok(val_bool(s.starts_with(&prefix))))
+            }
+            "ends_with" => {
+                if arg_vals.len() != 1 { return Some(arity_err(1)); }
+                let suffix = arg_vals[0].to_string();
+                Some(eval_ok(val_bool(s.ends_with(&suffix))))
+            }
+            "slice" => {
+                if arg_vals.len() != 2 { return Some(arity_err(2)); }
+                let start = arg_vals[0].to_int();
+                let end = arg_vals[1].to_int();
+                // UTF-8 安全切片：先收 chars 再切
+                let chars: Vec<char> = s.chars().collect();
+                let len = chars.len() as i64;
+                let s_idx = start.max(0).min(len);
+                let e_idx = end.max(0).min(len);
+                let sliced: String = if s_idx <= e_idx {
+                    chars[s_idx as usize..e_idx as usize].iter().collect()
+                } else {
+                    String::new()
+                };
+                Some(eval_ok(val_string(sliced)))
+            }
+            _ => None, // 未知方法：让外层报 UnknownMethod
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! 单元测试覆盖 A3（整数溢出检查）和 A4（字符串基础操作）。
@@ -755,4 +868,80 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_str_len_chars() {
+        let r = run(r#"func main() { let s = "你好"; s.len() }"#);
+        expect_int(&r, 2);
     }
+
+    #[test]
+    fn test_str_len_bytes() {
+        let r = run(r#"func main() { let s = "你好"; s.len_bytes() }"#);
+        expect_int(&r, 6);
+    }
+
+    #[test]
+    fn test_str_concat() {
+        let r = run(r#"func main() { let s = "你好"; s.concat("世界") }"#);
+        expect_string(&r, "你好世界");
+    }
+
+    #[test]
+    fn test_str_contains() {
+        let r = run(r#"func main() { let s = "你好世界"; s.contains("好世") }"#);
+        expect_bool(&r, true);
+        let r = run(r#"func main() { let s = "你好世界"; s.contains("再见") }"#);
+        expect_bool(&r, false);
+    }
+
+    #[test]
+    fn test_str_starts_ends_with() {
+        let r = run(r#"func main() { let s = "你好世界"; s.starts_with("你好") }"#);
+        expect_bool(&r, true);
+        let r = run(r#"func main() { let s = "你好世界"; s.ends_with("世界") }"#);
+        expect_bool(&r, true);
+        let r = run(r#"func main() { let s = "你好世界"; s.starts_with("世界") }"#);
+        expect_bool(&r, false);
+    }
+
+    #[test]
+    fn test_str_slice_half_open() {
+        // 切片是半开 [start, end)
+        let r = run(r#"func main() { let s = "你好世界"; s.slice(0, 2) }"#);
+        expect_string(&r, "你好");
+        let r = run(r#"func main() { let s = "你好世界"; s.slice(2, 4) }"#);
+        expect_string(&r, "世界");
+        // 空切片
+        let r = run(r#"func main() { let s = "你好"; s.slice(1, 1) }"#);
+        expect_string(&r, "");
+        // 越界 end 自动 clamp
+        let r = run(r#"func main() { let s = "你好"; s.slice(0, 999) }"#);
+        expect_string(&r, "你好");
+    }
+
+    #[test]
+    fn test_str_unknown_method_errors() {
+        let r = run(r#"func main() { let s = "hi"; s.bogus() }"#);
+        assert_eq!(r.status, EvalStatus::Error);
+        match r.error {
+            Some(EvalError::UnknownMethod { ref method, .. }) => {
+                assert_eq!(method, "bogus");
+            }
+            other => panic!("expected UnknownMethod, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_str_method_on_int_errors() {
+        // Int 没有 len 方法
+        let r = run("func main() { let x = 42; x.len() }");
+        assert_eq!(r.status, EvalStatus::Error);
+        match r.error {
+            Some(EvalError::UnknownMethod { ref receiver_type, ref method }) => {
+                assert_eq!(receiver_type, "int");
+                assert_eq!(method, "len");
+            }
+            other => panic!("expected UnknownMethod, got {:?}", other),
+        }
+    }
+}
