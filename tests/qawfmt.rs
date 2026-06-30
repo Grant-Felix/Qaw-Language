@@ -4,7 +4,7 @@
 //! 与 tests/qawpm.rs 保持同一种风格。
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn qawfmt_bin() -> PathBuf {
@@ -26,7 +26,7 @@ fn workspace_tmp(name: &str) -> PathBuf {
     p
 }
 
-fn write_file(dir: &PathBuf, name: &str, content: &str) -> PathBuf {
+fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
     let path = dir.join(name);
     fs::write(&path, content).expect("write file");
     path

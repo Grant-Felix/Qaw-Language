@@ -251,7 +251,7 @@ fn render_trailing_newline_diff(path: &str, lines: &[&str], adding: bool) -> Str
     if n == 0 {
         // 文件完全为空但末尾换行状态不同
         let (a_n, b_n) = if adding { (0, 1) } else { (1, 0) };
-        return format!("{}@@ -{},0 +{},{} @@\n", header, a_n, b_n, if adding { 1 } else { 1 });
+        return format!("{}@@ -{},0 +{},{} @@\n", header, a_n, b_n, 1);
     }
     let last_line = lines.last().copied().unwrap_or("");
     if adding {

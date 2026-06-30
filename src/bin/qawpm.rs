@@ -1,3 +1,7 @@
+//! v0.12 实现；unquote 函数有两个 if-else 分支（字符串 vs 单字符）
+//! 形式相同是 TOML 字面量语法决定，非可简化代码。
+#![allow(clippy::if_same_then_else)]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
