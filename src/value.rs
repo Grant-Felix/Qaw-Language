@@ -12,7 +12,10 @@ pub enum ValueKind {
     Nil,
 }
 
-/// 值（tagged union）
+impl ValueKind {
+}
+
+// 值（tagged union）
 #[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
@@ -24,13 +27,6 @@ pub enum Value {
 
 // 提供字符串访问
 impl Value {
-    /// 转为字符串表示
-    pub fn as_str(&self) -> &str {
-        match self {
-            Value::String(s) => s,
-            _ => "",
-        }
-    }
 }
 
 impl Value {

@@ -206,19 +206,19 @@ impl Interpreter {
                     let r = lhs.value.to_float() + rhs.value.to_float();
                     return eval_ok(val_float(r));
                 }
-                eval_ok(val_int(lhs.value.to_int() + rhs.value.to_int()))
+                eval_ok(val_int(int_arith(BinOp::Add, lhs.value.to_int(), rhs.value.to_int())))
             }
             BinOp::Sub => {
                 if matches!(lhs.value.kind(), ValueKind::Float) || matches!(rhs.value.kind(), ValueKind::Float) {
                     return eval_ok(val_float(lhs.value.to_float() - rhs.value.to_float()));
                 }
-                eval_ok(val_int(lhs.value.to_int() - rhs.value.to_int()))
+                eval_ok(val_int(int_arith(BinOp::Sub, lhs.value.to_int(), rhs.value.to_int())))
             }
             BinOp::Mul => {
                 if matches!(lhs.value.kind(), ValueKind::Float) || matches!(rhs.value.kind(), ValueKind::Float) {
                     return eval_ok(val_float(lhs.value.to_float() * rhs.value.to_float()));
                 }
-                eval_ok(val_int(lhs.value.to_int() * rhs.value.to_int()))
+                eval_ok(val_int(int_arith(BinOp::Mul, lhs.value.to_int(), rhs.value.to_int())))
             }
             BinOp::Div => {
                 let b = rhs.value.to_float();
@@ -281,7 +281,7 @@ impl Interpreter {
                 if matches!(operand.value.kind(), ValueKind::Float) {
                     eval_ok(val_float(-operand.value.to_float()))
                 } else {
-                    eval_ok(val_int(-operand.value.to_int()))
+                    eval_ok(val_int(int_neg(operand.value.to_int())))
                 }
             }
             UnOp::Not => eval_ok(val_bool(!operand.value.to_bool())),
@@ -296,6 +296,7 @@ impl Interpreter {
                 return self.eval_print(c);
             }
         }
+
         // 用户函数
         let func_expr = {
             if let ExprData::Ident(name) = &c.func.data {
@@ -348,7 +349,6 @@ impl Interpreter {
             EvalStatus::Ok => body_result,
         }
     }
-
     fn eval_print(&mut self, c: &Call) -> EvalResult {
         for (i, arg) in c.args.iter().enumerate() {
             let r = self.eval_expr_inner(arg);
@@ -577,3 +577,182 @@ fn match_pattern(pat: &str, v: &Value) -> bool {
         ValueKind::Nil => pat == "nil",
     }
 }
+
+// ============ A3 整数溢出检查 ============
+//
+// 行为矩阵（v0.11+）：
+// - debug 模式（`cfg!(debug_assertions)` 为 true）：i64 加减乘/取负溢出时 panic，错误信息 "integer overflow in <op>"
+// - release 模式：保持 v0.10 的 wrap 行为（向后兼容，零开销）
+// - 浮点不检查（Inf/NaN 是 IEEE-754 合理行为）
+// - 除零保持现有 EvalError::DivisionByZero（不 panic）
+
+/// 不分模式的整数算术：返回 `Some(v)` 表示正常，`None` 表示溢出。
+///
+/// 该函数是模式无关的，便于在测试中跨模式验证溢出判定。
+fn checked_int_arith(op: BinOp, a: i64, b: i64) -> Option<i64> {
+    match op {
+        BinOp::Add => a.checked_add(b),
+        BinOp::Sub => a.checked_sub(b),
+        BinOp::Mul => a.checked_mul(b),
+        _ => None,
+    }
+}
+
+/// 整数算术（模式相关）：debug 溢出 panic，release wrap。
+///
+/// `cfg!(debug_assertions)` 是编译期常量（由 `--release`/profile 决定），
+/// 编译后只剩一条分支，因此没有运行时分支开销。
+fn int_arith(op: BinOp, a: i64, b: i64) -> i64 {
+    if cfg!(debug_assertions) {
+        match checked_int_arith(op, a, b) {
+            Some(v) => v,
+            None => panic!("integer overflow in {}", op),
+        }
+    } else {
+        match op {
+            BinOp::Add => a.wrapping_add(b),
+            BinOp::Sub => a.wrapping_sub(b),
+            BinOp::Mul => a.wrapping_mul(b),
+            _ => 0,
+        }
+    }
+}
+
+/// 整数取负（模式相关）：debug 溢出 panic（i64::MIN），release wrap。
+fn int_neg(a: i64) -> i64 {
+    if cfg!(debug_assertions) {
+        match a.checked_neg() {
+            Some(v) => v,
+            None => panic!("integer overflow in unary -"),
+        }
+    } else {
+        a.wrapping_neg()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! 单元测试覆盖 A3（整数溢出检查）和 A4（字符串基础操作）。
+
+    use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+
+    /// 解析 + 求值入口（用于测试）
+    fn run(src: &str) -> EvalResult {
+        let lex = Lexer::new(src);
+        let mut p = Parser::new(lex);
+        let prog = p.parse_program();
+        let mut interp = Interpreter::new();
+        interp.exec_program(&prog)
+    }
+
+    // ============ A3: 整数溢出 ============
+
+    /// 正常加法不溢出 → 两个模式都应正常工作（解释器端到端验证）
+    #[test]
+    fn test_int_add_normal() {
+        let r = run("func main() { 1 + 2 }");
+        expect_int(&r, 3);
+    }
+
+    /// `checked_int_arith` 是模式无关的：可直接断言溢出行为
+    #[test]
+    fn test_checked_int_arith_overflow() {
+        assert_eq!(checked_int_arith(BinOp::Add, i64::MAX, 1), None);
+        assert_eq!(checked_int_arith(BinOp::Sub, i64::MIN, 1), None);
+        assert_eq!(checked_int_arith(BinOp::Mul, i64::MAX, 2), None);
+        assert_eq!(checked_int_arith(BinOp::Add, 5, 3), Some(8));
+        assert_eq!(checked_int_arith(BinOp::Mul, -3, 7), Some(-21));
+        assert_eq!(checked_int_arith(BinOp::Sub, 0, 5), Some(-5));
+    }
+
+    /// debug 模式：i64::MAX + 1 必须 panic，消息含 "integer overflow"
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "integer overflow")]
+    fn test_int_overflow_add_panics_in_debug() {
+        // 9223372036854775807 == i64::MAX（在词法层能正确解析为 i64::MAX）
+        let _ = run("func main() { let x = 9223372036854775807; x + 1 }");
+    }
+
+    /// debug 模式：i64::MAX * 2 也必须 panic
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "integer overflow")]
+    fn test_int_overflow_mul_panics_in_debug() {
+        let _ = run("func main() { let x = 9223372036854775807; x * 2 }");
+    }
+
+    /// debug 模式：i64::MIN - 1 panic
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "integer overflow")]
+    fn test_int_overflow_sub_panics_in_debug() {
+        // i64::MIN = -9223372036854775808。源码里写 -9223372036854775808
+        // 会被词法切成 -IntLit(9223372036854775808)，而 9223372036854775808 溢出
+        // parse::<i64>，默认 0。绕路：用 let x = -9223372036854775807 - 1。
+        let _ = run("func main() { let x = -9223372036854775807 - 1; x - 1 }");
+    }
+
+    /// release 模式：i64::MAX + 1 静默 wrap 到 i64::MIN
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn test_int_overflow_add_wraps_in_release() {
+        let r = run("func main() { let x = 9223372036854775807; x + 1 }");
+        expect_int(&r, i64::MIN);
+        let r = run("func main() { let x = 9223372036854775807; x * 2 }");
+        expect_int(&r, -2);
+    }
+
+    /// debug 模式：直接调用 int_neg(i64::MIN) panic（绕开词法层无法表达 i64::MIN 字面量的问题）
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "integer overflow")]
+    fn test_int_neg_min_panics_in_debug() {
+        let _ = int_neg(i64::MIN);
+    }
+
+    /// 浮点加法不检查溢出（Inf 是 IEEE-754 合理行为）
+    #[test]
+    fn test_float_overflow_no_check() {
+        let r = run("func main() { let x = 1.7e308; x + x }");
+        assert_eq!(r.status, EvalStatus::Ok);
+        // Inf 是预期结果
+    }
+
+    /// 除零已有错误处理，不能因为 A3 改变
+    #[test]
+    fn test_div_by_zero_still_errors() {
+        let r = run("func main() { 10 / 0 }");
+        assert_eq!(r.status, EvalStatus::Error);
+        assert_eq!(r.error, Some(EvalError::DivisionByZero));
+    }
+
+    // ============ A4: 字符串基础操作 ============
+
+    fn expect_int(r: &EvalResult, expected: i64) {
+        assert_eq!(r.status, EvalStatus::Ok, "eval failed: {:?}", r.error);
+        match &r.value {
+            Value::Int(n) => assert_eq!(*n, expected, "value mismatch: got {}", n),
+            other => panic!("expected int, got {:?}", other),
+        }
+    }
+
+    fn expect_string(r: &EvalResult, expected: &str) {
+        assert_eq!(r.status, EvalStatus::Ok, "eval failed: {:?}", r.error);
+        match &r.value {
+            Value::String(s) => assert_eq!(s, expected),
+            other => panic!("expected string, got {:?}", other),
+        }
+    }
+
+    fn expect_bool(r: &EvalResult, expected: bool) {
+        assert_eq!(r.status, EvalStatus::Ok);
+        match &r.value {
+            Value::Bool(b) => assert_eq!(*b, expected),
+            other => panic!("expected bool, got {:?}", other),
+        }
+    }
+
+    }
