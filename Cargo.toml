@@ -1,6 +1,6 @@
 [package]
 name = "qawc"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2021"
 description = "Qaw Language Compiler - 妖文编程语言"
 license = "Apache-2.0"
@@ -16,6 +16,10 @@ path = "src/bin/qawpm.rs"
 [[bin]]
 name = "qawtest"
 path = "src/bin/qawtest.rs"
+
+[[bin]]
+name = "qawdoc"
+path = "src/bin/qawdoc.rs"
 
 [profile.release]
 opt-level = 2
