@@ -116,7 +116,7 @@ impl Codegen {
             self.output.push('(');
             for (i, p) in fd.params.iter().enumerate() {
                 if i > 0 { self.output.push_str(", "); }
-                self.output.push_str(&c_type_for(p.type_name.as_deref()));
+                self.output.push_str(&c_type_for(p.type_annotation.as_ref().map(|t| t.root_name())));
                 self.output.push(' ');
                 self.output.push_str(&p.name);
             }
@@ -143,7 +143,7 @@ impl Codegen {
         match &stmt.data {
             ExprData::VarDecl(v) => {
                 let prefix = "  ".repeat(self.indent);
-                let t = c_type_for(v.type_name.as_deref());
+                let t = c_type_for(v.type_annotation.as_ref().map(|t| t.root_name()));
                 write!(self.output, "{}{} {}", prefix, t, v.name).unwrap();
                 if let Some(i) = &v.init {
                     self.output.push_str(" = ");

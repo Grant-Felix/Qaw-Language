@@ -1,7 +1,7 @@
 //! parse_struct / parse_enum — 用户自定义聚合类型
 
 use super::Parser;
-use crate::ast::{field_decl, new_enum, new_struct, variant_decl, Expr};
+use crate::ast::{field_decl, new_enum, new_struct, type_nullable, variant_decl, Expr};
 use crate::lexer::TokKind;
 
 impl Parser {
@@ -27,13 +27,15 @@ impl Parser {
                     let fname = self.current.lexeme.clone();
                     self.advance();
                     if !self.expect(TokKind::Colon, "':'") { break; }
-                    let ftype = if self.check(TokKind::Ident) {
-                        let t = self.current.lexeme.clone();
-                        self.advance();
-                        t
-                    } else {
-                        self.error("期望类型");
-                        "?".to_string()
+                    // 字段类型（A1）：`T` 或 `T?`
+                    let ftype = match self.parse_type_annotation() {
+                        Some(mut ann) => {
+                            if self.match_tok(TokKind::Question) {
+                                ann = type_nullable(ann);
+                            }
+                            ann.root_name().to_string()
+                        }
+                        None => "?".to_string(),
                     };
                     fields.push(field_decl(fname, ftype));
                     self.match_tok(TokKind::Comma);

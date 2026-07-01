@@ -105,6 +105,30 @@ impl Parser {
         }
     }
 
+    /// 解析类型注解（用于 var/param/field 后缀的 `: T` 部分）
+    ///
+    /// v0.20 第一版：仅支持单个标识符作为类型名（如 `int`、`MyStruct`）；
+    /// 复杂类型（泛型、数组、函数签名）推到 v0.30。
+    pub(crate) fn parse_type_annotation(&mut self) -> Option<TypeAnnotation> {
+        if let Some(name) = self.consume_ident() {
+            Some(type_name(name))
+        } else {
+            self.error("期望类型名");
+            None
+        }
+    }
+
+    /// 消耗当前 token（如果是 Ident）并返回其 lexeme
+    pub(crate) fn consume_ident(&mut self) -> Option<String> {
+        if self.check(TokKind::Ident) {
+            let s = self.current.lexeme.clone();
+            self.advance();
+            Some(s)
+        } else {
+            None
+        }
+    }
+
     fn synchronize(&mut self) {
         self.panic_mode = false;
         while !self.check(TokKind::Eof) {

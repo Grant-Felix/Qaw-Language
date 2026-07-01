@@ -4,7 +4,7 @@
 //! 辅助方法（advance/match_tok/...）通过 super::Parser 的继承可见性访问。
 
 use super::Parser;
-use crate::ast::{new_function, param, Expr};
+use crate::ast::{new_function, param, type_nullable, Expr};
 use crate::lexer::TokKind;
 
 impl Parser {
@@ -31,14 +31,16 @@ impl Parser {
                     if self.check(TokKind::Ident) {
                         let pname = self.current.lexeme.clone();
                         self.advance();
+                        // 参数类型注解（A1）：`: T` 或 `: T?`
                         let ptype = if self.match_tok(TokKind::Colon) {
-                            if self.check(TokKind::Ident) {
-                                let t = self.current.lexeme.clone();
-                                self.advance();
-                                Some(t)
-                            } else {
-                                self.error("期望类型名");
-                                None
+                            match self.parse_type_annotation() {
+                                Some(mut ann) => {
+                                    if self.match_tok(TokKind::Question) {
+                                        ann = type_nullable(ann);
+                                    }
+                                    Some(ann)
+                                }
+                                None => None,
                             }
                         } else {
                             None
@@ -56,7 +58,7 @@ impl Parser {
             self.expect(TokKind::RParen, "')'");
         }
 
-        // 返回类型
+        // 返回类型（v0.20：第一版暂保持 Option<String>，T? 形式待 v0.30 一起做）
         let ret_type = if self.match_tok(TokKind::Arrow) {
             if self.check(TokKind::Ident) {
                 let t = self.current.lexeme.clone();

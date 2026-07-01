@@ -3,7 +3,7 @@
 use super::Parser;
 use crate::ast::{
     new_assign, new_binary, new_call, new_field_access, new_index, new_slice, new_unary,
-    BinOp, Expr, Kind, UnOp,
+    new_unwrap, BinOp, Expr, Kind, UnOp,
 };
 use crate::lexer::TokKind;
 
@@ -82,7 +82,7 @@ impl Parser {
         self.parse_postfix()
     }
 
-    /// 后缀：调用、字段、索引、切片
+    /// 后缀：调用、字段、索引、切片、unwrap（A1）
     fn parse_postfix(&mut self) -> Expr {
         let mut expr = self.parse_primary();
         loop {
@@ -114,6 +114,15 @@ impl Parser {
                     let field = self.current.lexeme.clone();
                     self.advance();
                     expr = new_field_access(expr, field, line, col);
+                }
+                TokKind::Question => {
+                    // A1：unwrap 后缀 `x?`
+                    // 注：词法层会把 `?.` 切成 QuestionDot、`??` 切成 QuestionQuestion，
+                    // 故此处只匹配单独 `?`，不会与安全导航 / 空合并冲突。
+                    let line = self.current.line;
+                    let col = self.current.col;
+                    self.advance();
+                    expr = new_unwrap(expr, line, col);
                 }
                 TokKind::LBracket => {
                     let line = self.current.line;

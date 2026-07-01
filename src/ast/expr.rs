@@ -62,6 +62,15 @@ pub struct Slice {
     pub inclusive: bool,
 }
 
+/// `x?` —— 强制解包可空值（A1: Sound null safety）
+///
+/// 若 `x` 求值为 `Nil` 则运行时错误；否则原样返回值。
+/// v0.20 第一版：对非 Nil 的值不做类型推导（即使 x 类型为非 T? 也允许 unwrap，按"宽松版"约定）。
+#[derive(Debug, Clone)]
+pub struct Unwrap {
+    pub expr: Box<Expr>,
+}
+
 // ============ 构造器 ============
 
 pub fn new_binary(op: BinOp, lhs: Expr, rhs: Expr, line: u32, col: u32) -> Expr {
@@ -140,5 +149,15 @@ pub fn new_slice(
             end: end.map(Box::new),
             inclusive,
         }),
+    }
+}
+
+/// 构造 `x?` 表达式节点
+pub fn new_unwrap(expr: Expr, line: u32, col: u32) -> Expr {
+    Expr {
+        kind: Kind::Unwrap,
+        line,
+        col,
+        data: ExprData::Unwrap(Unwrap { expr: Box::new(expr) }),
     }
 }

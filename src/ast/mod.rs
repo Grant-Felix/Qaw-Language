@@ -4,9 +4,9 @@
 //! 通过 `kind` 字段判断类型，union 提供类型化访问。
 //!
 //! 模块拆分：
-//! - `mod.rs`     本文件：核心类型 Kind / Expr / ExprData + Display + 调试打印 + 测试
+//! - `mod.rs`     本文件：核心类型 Kind / Expr / ExprData / TypeAnnotation + Display + 调试打印 + 测试
 //! - `literal`    StringLit / InterpPart + 字面量构造器
-//! - `expr`       BinOp / UnOp / BinaryOp / UnaryOp / Call / FieldAccess / Index / Slice + 表达式构造器
+//! - `expr`       BinOp / UnOp / BinaryOp / UnaryOp / Call / FieldAccess / Index / Slice / Unwrap + 表达式构造器
 //! - `stmt`       VarDecl / Assign / ExprStmt / Block / IfStmt / WhileStmt / ForKind / ForStmt / ReturnStmt / MatchArm / MatchStmt + 语句构造器
 //! - `decl`       Param / Function / FieldDecl / StructDecl / VariantDecl / EnumDecl / Program + 声明构造器
 //!
@@ -24,8 +24,8 @@ use std::fmt;
 pub use literal::{interp_expr, interp_text, new_array_lit, new_bool_lit, new_char_lit, new_float_lit, new_ident, new_int_lit, new_string_lit, string_lit_simple, InterpPart, StringLit};
 #[allow(unused_imports)]
 pub use expr::{
-    new_binary, new_call, new_field_access, new_index, new_slice, new_unary, BinOp, BinaryOp,
-    Call, FieldAccess, Index, Slice, UnOp, UnaryOp,
+    new_binary, new_call, new_field_access, new_index, new_slice, new_unary, new_unwrap, BinOp,
+    BinaryOp, Call, FieldAccess, Index, Slice, UnOp, UnaryOp, Unwrap,
 };
 #[allow(unused_imports)]
 pub use stmt::{
@@ -39,6 +39,46 @@ pub use decl::{
     field_decl, match_arm, new_enum, new_function, new_program, new_struct, param, variant_decl,
     EnumDecl, FieldDecl, Function, Param, Program, StructDecl, VariantDecl,
 };
+
+/// 类型注解（A1: Sound null safety）
+///
+/// 表达 `int` / `string` / `int?` / `UserType?` 等可空性标注。
+/// v0.20 第一版仅支持"名字 + 可选 ? 后缀"，复杂类型（泛型、数组、函数）推到 v0.30。
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeAnnotation {
+    /// 简单类型名，如 `int`、`string`、`MyStruct`
+    Name(String),
+    /// 可空类型，如 `int?`
+    Nullable(Box<TypeAnnotation>),
+}
+
+impl TypeAnnotation {
+    /// 是否为可空类型（含多层 Nullable 包装也视为可空）
+    pub fn is_nullable(&self) -> bool {
+        match self {
+            TypeAnnotation::Name(_) => false,
+            TypeAnnotation::Nullable(_) => true,
+        }
+    }
+
+    /// 提取最里层类型名（去除 Nullable 包装）
+    pub fn root_name(&self) -> &str {
+        match self {
+            TypeAnnotation::Name(s) => s,
+            TypeAnnotation::Nullable(inner) => inner.root_name(),
+        }
+    }
+}
+
+/// 构造简单类型注解 `T`
+pub fn type_name(s: String) -> TypeAnnotation {
+    TypeAnnotation::Name(s)
+}
+
+/// 构造可空类型注解 `T?`
+pub fn type_nullable(inner: TypeAnnotation) -> TypeAnnotation {
+    TypeAnnotation::Nullable(Box::new(inner))
+}
 
 /// 节点类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +98,7 @@ pub enum Kind {
     FieldAccess,
     Index,
     Slice,
+    Unwrap,
     // 语句
     VarDecl,
     Assign,
@@ -97,6 +138,7 @@ pub enum ExprData {
     FieldAccess(FieldAccess),
     Index(Index),
     Slice(Slice),
+    Unwrap(Unwrap),
     VarDecl(VarDecl),
     Assign(Assign),
     ExprStmt(ExprStmt),
@@ -242,9 +284,17 @@ pub fn print_expr(node: &Expr, indent: usize) {
             if let Some(e) = &s.start { print_expr(e, indent + 2); }
             if let Some(e) = &s.end { print_expr(e, indent + 2); }
         }
+        ExprData::Unwrap(u) => {
+            println!(" <unwrap>");
+            print_expr(&u.expr, indent + 2);
+        }
         ExprData::VarDecl(v) => {
             println!(" name={} mut={}", v.name, v.is_mut);
-            if let Some(t) = &v.type_name { println!("{}  type={}", pad, t); }
+            if let Some(t) = &v.type_annotation {
+                let is_nullable = t.is_nullable();
+                let name = t.root_name();
+                println!("{}  type={}{}", pad, name, if is_nullable { "?" } else { "" });
+            }
             if let Some(i) = &v.init { print_expr(i, indent + 2); }
         }
         ExprData::Assign(a) => {
@@ -303,7 +353,10 @@ pub fn print_expr(node: &Expr, indent: usize) {
         }
         ExprData::StructDecl(s) => {
             println!(" name={} fields={}", s.name, s.fields.len());
-            for fd in &s.fields { println!("{}  field={}:{}", pad, fd.name, fd.type_name.as_deref().unwrap_or("?")); }
+            for fd in &s.fields {
+                let tn = fd.type_annotation.as_ref().map(|t| t.root_name()).unwrap_or("?");
+                println!("{}  field={}:{}", pad, fd.name, tn);
+            }
         }
         ExprData::EnumDecl(e) => {
             println!(" name={} variants={}", e.name, e.variants.len());
@@ -352,7 +405,14 @@ mod tests {
 
     #[test]
     fn test_var_decl() {
-        let e = new_var_decl("x".into(), Some("int".into()), false, Some(new_int_lit(0, 1, 1)), 1, 1);
+        let e = new_var_decl(
+            "x".into(),
+            Some(type_name("int".into())),
+            false,
+            Some(new_int_lit(0, 1, 1)),
+            1,
+            1,
+        );
         assert_eq!(e.kind, Kind::VarDecl);
     }
 
@@ -375,5 +435,43 @@ mod tests {
         let vd = new_var_decl("x".into(), None, false, Some(inner), 1, 5);
         let prog = new_program(vec![vd], 1, 1);
         assert_eq!(prog.kind, Kind::Program);
+    }
+
+    // ============ A1: TypeAnnotation / Unwrap ============
+
+    #[test]
+    fn test_type_annotation_name() {
+        let ann = type_name("int".into());
+        assert_eq!(ann.root_name(), "int");
+        assert!(!ann.is_nullable());
+    }
+
+    #[test]
+    fn test_type_annotation_nullable() {
+        let ann = type_nullable(type_name("int".into()));
+        assert_eq!(ann.root_name(), "int");
+        assert!(ann.is_nullable());
+    }
+
+    #[test]
+    fn test_type_annotation_nested_nullable() {
+        // 双层 ? 虽然语法层不会出现（只允许 T?），但 root_name 应能穿透
+        let ann = type_nullable(type_nullable(type_name("string".into())));
+        assert_eq!(ann.root_name(), "string");
+        assert!(ann.is_nullable());
+    }
+
+    #[test]
+    fn test_unwrap_expr() {
+        // x? 等价于 Unwrap(Ident("x"))
+        let inner = new_ident("x".into(), 1, 1);
+        let e = new_unwrap(inner, 1, 3);
+        assert_eq!(e.kind, Kind::Unwrap);
+        match &e.data {
+            ExprData::Unwrap(u) => {
+                assert!(matches!(&u.expr.data, ExprData::Ident(s) if s == "x"));
+            }
+            _ => panic!("expected Unwrap"),
+        }
     }
 }

@@ -1,7 +1,7 @@
 //! parse_var_decl / parse_return / parse_expr_stmt — 声明类语句
 
 use super::Parser;
-use crate::ast::{new_expr_stmt, new_return, new_var_decl, Expr};
+use crate::ast::{new_expr_stmt, new_return, new_var_decl, type_nullable, Expr};
 use crate::lexer::TokKind;
 
 impl Parser {
@@ -25,14 +25,16 @@ impl Parser {
             "error".to_string()
         };
 
-        let type_name = if self.match_tok(TokKind::Colon) {
-            if self.check(TokKind::Ident) {
-                let t = self.current.lexeme.clone();
-                self.advance();
-                Some(t)
-            } else {
-                self.error("期望类型");
-                None
+        // 类型注解（A1）：`: T` 或 `: T?`
+        let type_annotation = if self.match_tok(TokKind::Colon) {
+            match self.parse_type_annotation() {
+                Some(mut ann) => {
+                    if self.match_tok(TokKind::Question) {
+                        ann = type_nullable(ann);
+                    }
+                    Some(ann)
+                }
+                None => None,
             }
         } else {
             None
@@ -45,7 +47,7 @@ impl Parser {
         };
 
         self.match_tok(TokKind::Semi);
-        new_var_decl(name, type_name, is_mut, init, line, col)
+        new_var_decl(name, type_annotation, is_mut, init, line, col)
     }
 
     /// 解析 return

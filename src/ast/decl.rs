@@ -1,14 +1,14 @@
 //! 声明类型与构造器（函数、结构体、枚举、程序、参数等）
 
 use super::stmt::MatchArm;
-use super::{Expr, ExprData, Kind};
+use super::{Expr, ExprData, Kind, TypeAnnotation};
 
 // ============ 声明结构 ============
 
 #[derive(Debug, Clone)]
 pub struct Param {
     pub name: String,
-    pub type_name: Option<String>,
+    pub type_annotation: Option<TypeAnnotation>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ pub struct Function {
 #[derive(Debug, Clone)]
 pub struct FieldDecl {
     pub name: String,
-    pub type_name: Option<String>,
+    pub type_annotation: Option<TypeAnnotation>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,13 +113,13 @@ pub fn match_arm(pattern: String, body: Expr) -> MatchArm {
 }
 
 pub fn field_decl(name: String, type_name: String) -> FieldDecl {
-    FieldDecl { name, type_name: Some(type_name) }
+    FieldDecl { name, type_annotation: Some(TypeAnnotation::Name(type_name)) }
 }
 
 pub fn variant_decl(name: String, payload: Option<String>) -> VariantDecl {
     VariantDecl { name, payload }
 }
 
-pub fn param(name: String, type_name: Option<String>) -> Param {
-    Param { name, type_name }
+pub fn param(name: String, type_annotation: Option<TypeAnnotation>) -> Param {
+    Param { name, type_annotation }
 }

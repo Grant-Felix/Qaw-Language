@@ -1,13 +1,13 @@
 //! 语句类型与构造器
 
-use super::{Expr, ExprData, Kind};
+use super::{Expr, ExprData, Kind, TypeAnnotation};
 
 // ============ 语句结构 ============
 
 #[derive(Debug, Clone)]
 pub struct VarDecl {
     pub name: String,
-    pub type_name: Option<String>,
+    pub type_annotation: Option<TypeAnnotation>,
     pub is_mut: bool,
     pub init: Option<Box<Expr>>,
 }
@@ -85,7 +85,7 @@ pub struct DeferStmt {
 
 pub fn new_var_decl(
     name: String,
-    type_name: Option<String>,
+    type_annotation: Option<TypeAnnotation>,
     is_mut: bool,
     init: Option<Expr>,
     line: u32,
@@ -97,7 +97,7 @@ pub fn new_var_decl(
         col,
         data: ExprData::VarDecl(VarDecl {
             name,
-            type_name,
+            type_annotation,
             is_mut,
             init: init.map(Box::new),
         }),
